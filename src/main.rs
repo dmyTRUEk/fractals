@@ -82,7 +82,7 @@ fn main() {
 		if is_redraw_needed {
 			println!("frame {frame_i}"); frame_i += 1;
 
-			// println!("zoom = {zoom}");
+			println!("zoom = {zoom}");
 			// Compute center world coords AFTER zoom
 			let center_world_after = screen_to_world(STW{x:scx, y:scy, wf, hf, zoom, cam_x, cam_y});
 			// Adjust camera so center remains fixed
@@ -103,7 +103,7 @@ fn main() {
 					let mut z_esc = Complex64::zero();
 					let mut is_bounded = true;
 					let mut escape_iter_n: u32 = 0;
-					let n_iters: u32 = 20;
+					let n_iters: u32 = zoom_to_iters_n(zoom);
 					for i in 0..n_iters {
 						if !z.is_nan() {
 							z_last_not_nan = z;
@@ -226,6 +226,10 @@ impl FloatToColor {
 	}
 }
 
+
+fn zoom_to_iters_n(zoom: float) -> u32 {
+	20 + (zoom.log(1.3) as u32)
+}
 
 
 struct STW {
