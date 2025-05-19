@@ -179,10 +179,10 @@ fn main() {
 						if !z.is_nan() {
 							z_last_not_nan = z;
 						}
+						let z_new = expr.eval(z, z_prev, z_init);
 						z_prev = z;
-						// z = z.powi(2) + z_init;
-						z = expr.eval(z, z_prev, z_init);
-						if z.norm() > 100. || z.is_nan() {
+						z = z_new;
+						if (z.norm() > 100. || z.is_nan()) && is_bounded {
 							is_bounded = false;
 							escape_iter_n = j;
 							z_esc = z;
