@@ -1,0 +1,3 @@
+4768 -> ((Z*Z)+InitZ) // mandelbrot
+72458 -> sin(tan(sqrt(sqrt(Z))))
+6163501394283958681 // deep fried

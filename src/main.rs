@@ -43,24 +43,24 @@ const ZOOM_STEP: float = 1.1;
 struct CliArgs {
 	fractal_id: Option<String>,
 
-	/// TODO
+	// TODO
 	#[arg(short='s', long, default_value_t=false)]
 	assign_zesc_once: bool,
 
-	/// TODO
+	// TODO
 	#[arg(short='b', long, default_value_t=false)]
 	break_loop: bool,
 
-	/// TODO
+	// TODO
 	#[arg(short='e', long, default_value_t=100.)]
 	zesc_value: float,
 
-	/// TODO
-	#[arg(short='b', long, default_value_t=false)]
-	high_quality: bool,
+	// TODO
+	// #[arg(short='q', long, default_value_t=false)]
+	// high_quality: bool,
 
-	/// TODO
-	#[arg(short='b', long, default_value_t=false)]
+	// TODO
+	#[arg(short='r', long, default_value_t=false)]
 	keys_repeat: bool,
 }
 
@@ -78,7 +78,7 @@ impl From<CliArgs> for Params {
 		assign_zesc_once,
 		break_loop,
 		zesc_value,
-		high_quality,
+		// high_quality,
 		keys_repeat,
 	}: CliArgs) -> Self {
 		Self {
@@ -90,7 +90,7 @@ impl From<CliArgs> for Params {
 				} else {
 					let mut rng = rng();
 					loop {
-						const N_MAX_DIGITS: u32 = 9;
+						const N_MAX_DIGITS: u32 = 19;
 						let digits: u32 = rng.random_range(1 ..= N_MAX_DIGITS);
 						let id: u64 = if digits == 1 {
 							rng.random_range(0 ..= 9)
@@ -107,7 +107,7 @@ impl From<CliArgs> for Params {
 			assign_zesc_once,
 			break_loop,
 			zesc_value,
-			quality: if high_quality { Quality(10) } else { Quality(0) },
+			quality: Quality(0),
 			keys_repeat,
 		}
 	}
@@ -558,8 +558,8 @@ impl Expr {
 			PrevZ => format!("PrevZ"),
 			InitZ => format!("InitZ"),
 			UInt(n) => format!("{n}"),
-			Float(x) => format!("{x}"),
-			Complex(z) => format!("{z}"),
+			Float(x) => format!("{x:e}"),
+			Complex(z) => format!("{z:e}"),
 			// 1 order
 			Neg(x) => format!("-({})", x.to_string()),
 			Abs(e) => format!("abs({})", e.to_string()),
