@@ -1,13 +1,84 @@
 //! Render random fractals >:3
 
-use std::f64::consts::PI;
+#![feature(
+	box_patterns,
+	iter_intersperse,
+)]
+
+#![deny(unreachable_patterns)]
 
 use minifb::{Key, Window, WindowOptions};
-use num::{complex::{Complex64, ComplexFloat}, Zero};
+use num::{complex::{Complex64, ComplexFloat}, BigUint, One, Zero};
 use rand::{rng, Rng};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 
+mod utils_io;
+
+use utils_io::prompt;
+
+
+
+const MOVE_STEP: float = 0.1;
+const ZOOM_STEP: float = 1.1;
+
+
+
 fn main() {
+	// let fractal_4768_mandelbrot: Expr = {
+	// 	use Expr::*;
+	// 	Sum(bx((Prod(bx((Z, Z))), InitZ)))
+	// };
+	// let fractal_898512: Expr = {
+	// 	use Expr::*;
+	// 	// (sin(Z))^(sin(cosh(Z)))
+	// 	Pow(bx((Sin(bx(Z)), Sin(bx(Cosh(bx(Z)))))))
+	// };
+	// let fractal_x: Expr = {
+	// 	use Expr::*;
+	// 	//
+	// 	todo!()
+	// };
+	// for n in 0_u128.. {
+	// 	// let n: BigUint = prompt("Expr N: ").parse().unwrap();
+	// 	let n = BigUint::from(n);
+	// 	let expr = Expr::from_int(n.clone());
+	// 	println!("{} -> {}", n, expr.to_string());
+	// 	if expr == fractal_x { break }
+	// }
+	// #[allow(unreachable_code)]
+	// return;
+
+	let mut rng = rng();
+
+	// mandelbrot -> 4768
+	const PROMPT_STR: &str = "Input Fractal Number (default is random): ";
+	let user_input = prompt(PROMPT_STR);
+	let (n, expr) = if user_input != "" {
+		let mut user_input = user_input;
+		loop {
+			if let Ok(n) = user_input.parse::<BigUint>() {
+				let expr = Expr::from_int(n.clone());
+				break (n, expr);
+			}
+			user_input = prompt(PROMPT_STR);
+		}
+	} else {
+		loop {
+			const N_MAX_DIGITS: u32 = 9;
+			let digits: u32 = rng.random_range(1 ..= N_MAX_DIGITS);
+			let n: u64 = if digits == 1 {
+				rng.random_range(0 ..= 9)
+			} else {
+				rng.random_range(10_u64.pow(digits-1) .. 10_u64.pow(digits))
+			};
+			let expr = Expr::from_u64(n);
+			if expr.contains_z() {
+				break (BigUint::from(n), expr);
+			}
+		}
+	};
+	println!("{n} -> {}", expr.to_string());
+
 	let (mut w, mut h) = (320, 240);
 	let (mut wf, mut hf) = (w as float, h as float);
 	let mut buffer: Vec<u32> = vec![0; w * h];
@@ -25,8 +96,6 @@ fn main() {
 	window.set_target_fps(60);
 	window.update_with_buffer(&buffer, w, h).unwrap();
 
-	let mut rng = rng();
-
 	let mut frame_i: u64 = 0;
 
 	let mut zoom: float = 1.0;
@@ -41,7 +110,7 @@ fn main() {
 		let new_size = w * h;
 		if new_size != buffer.len() {
 			buffer.resize(new_size, 0);
-			println!("Resized to {w}x{h}");
+			// println!("Resized to {w}x{h}");
 			is_redraw_needed = true;
 		}
 		// let ratio_hw = hf / wf;
@@ -80,9 +149,10 @@ fn main() {
 		}
 
 		if is_redraw_needed {
-			println!("frame {frame_i}"); frame_i += 1;
+			// println!("\nframe {frame_i}:"); frame_i += 1;
 
-			println!("zoom = {zoom}");
+			// println!("cam xy: {cam_x}, {cam_y}");
+			// println!("zoom = {zoom}  ->  n_iters = {}", zoom_to_iters_n(zoom));
 			// Compute center world coords AFTER zoom
 			let center_world_after = screen_to_world(STW{x:scx, y:scy, wf, hf, zoom, cam_x, cam_y});
 			// Adjust camera so center remains fixed
@@ -99,19 +169,22 @@ fn main() {
 					let (x, y) = screen_to_world(STW{x, y, wf, hf, zoom, cam_x, cam_y});
 					let z_init = Complex64::new(x, y);
 					let mut z = z_init;
+					let mut z_prev = z_init;
 					let mut z_last_not_nan = z;
 					let mut z_esc = Complex64::zero();
 					let mut is_bounded = true;
 					let mut escape_iter_n: u32 = 0;
 					let n_iters: u32 = zoom_to_iters_n(zoom);
-					for i in 0..n_iters {
+					for j in 0..n_iters {
 						if !z.is_nan() {
 							z_last_not_nan = z;
 						}
-						z = z.powi(2) + z_init;
+						z_prev = z;
+						// z = z.powi(2) + z_init;
+						z = expr.eval(z, z_prev, z_init);
 						if z.norm() > 100. || z.is_nan() {
 							is_bounded = false;
-							escape_iter_n = i;
+							escape_iter_n = j;
 							z_esc = z;
 							// break;
 						}
@@ -133,8 +206,8 @@ fn main() {
 }
 
 
-const MOVE_STEP: float = 0.1;
-const ZOOM_STEP: float = 1.1;
+#[allow(non_camel_case_types)]
+type float = f64;
 
 
 const I: Complex64 = Complex64::I;
@@ -228,7 +301,7 @@ impl FloatToColor {
 
 
 fn zoom_to_iters_n(zoom: float) -> u32 {
-	20 + (zoom.log(1.3) as u32)
+	20 + (zoom.log(1.1) as u32)
 }
 
 
@@ -252,6 +325,453 @@ fn screen_to_world(STW { x, y, wf, hf, zoom, cam_x, cam_y }: STW) -> (float, flo
 
 
 
-#[allow(non_camel_case_types)]
-type float = f64;
+
+
+/// Box::new(...)
+fn bx<T>(value: T) -> Box<T> {
+	Box::new(value)
+}
+
+
+fn cf(re: float, im: float) -> Complex64 {
+	Complex64::new(re, im)
+}
+fn cfr(x: float) -> Complex64 {
+	Complex64::new(x, 0.)
+}
+fn cfi(x: float) -> Complex64 {
+	Complex64::new(0., x)
+}
+
+
+
+#[derive(Debug, Clone, PartialEq)]
+enum Expr {
+	// WARNING: IF CHANGED UPDATE CONSTS
+	// 0 order
+	// finite variants:
+	Z,
+	PrevZ,
+	InitZ,
+	// infinite variants:
+	UInt(u64),
+	Float(float),
+	Complex(Complex64),
+	// 1 order
+	Neg(Box<Expr>),
+	Abs(Box<Expr>),
+	Arg(Box<Expr>),
+	Exp(Box<Expr>),
+	Sqrt(Box<Expr>),
+	Sin(Box<Expr>),
+	Cos(Box<Expr>),
+	Tan(Box<Expr>),
+	Sinh(Box<Expr>),
+	Cosh(Box<Expr>),
+	Tanh(Box<Expr>),
+	Ln(Box<Expr>),
+	// 2 order
+	Sum(Box<(Expr, Expr)>),
+	Prod(Box<(Expr, Expr)>),
+	Div(Box<(Expr, Expr)>),
+	Pow(Box<(Expr, Expr)>),
+	// WARNING: IF CHANGED UPDATE CONSTS
+}
+impl Expr {
+	// WARNING: UPDATE HERE IF ENUM CHANGED
+	const NUMBER_OF_FINITE_VARIANTS: u64 = 3;
+	const NUMBER_OF_INFINITE_VARIANTS: u64 = 3 + 12 + 4;
+
+	fn eval(&self, z: Complex64, prev_z: Complex64, init_z: Complex64) -> Complex64 {
+		use Expr::*;
+		match &self {
+			// 0 order
+			Z => z,
+			PrevZ => prev_z,
+			InitZ => init_z,
+			UInt(n) => cfr(*n as float),
+			Float(x) => cfr(*x),
+			Complex(c) => *c,
+			// 1 order
+			Neg(e) => -e.eval(z, prev_z, init_z),
+			Abs(e) => cfr(e.eval(z, prev_z, init_z).abs()),
+			Arg(e) => cfr(e.eval(z, prev_z, init_z).arg()),
+			Exp(e) => e.eval(z, prev_z, init_z).exp(),
+			Sqrt(e) => e.eval(z, prev_z, init_z).sqrt(),
+			Sin(e) => e.eval(z, prev_z, init_z).sin(),
+			Cos(e) => e.eval(z, prev_z, init_z).cos(),
+			Tan(e) => e.eval(z, prev_z, init_z).tan(),
+			Sinh(e) => e.eval(z, prev_z, init_z).sinh(),
+			Cosh(e) => e.eval(z, prev_z, init_z).cosh(),
+			Tanh(e) => e.eval(z, prev_z, init_z).tanh(),
+			Ln(e) => e.eval(z, prev_z, init_z).ln(),
+			// 2 order
+			Sum(box(l, r)) => l.eval(z, prev_z, init_z) + r.eval(z, prev_z, init_z), // es.into_iter().map(|e| e.eval(z, prev_z, init_z)).sum(),
+			Prod(box(l, r)) => l.eval(z, prev_z, init_z) * r.eval(z, prev_z, init_z), // es.into_iter().map(|e| e.eval(z, prev_z, init_z)).product(),
+			Div(box(num, denom)) => num.eval(z, prev_z, init_z) / denom.eval(z, prev_z, init_z),
+			Pow(box(b, t)) => b.eval(z, prev_z, init_z).powc(t.eval(z, prev_z, init_z)),
+			// _ => todo!()
+		}
+	}
+
+	fn to_string(&self) -> String {
+		use Expr::*;
+		match self {
+			// 0 order
+			Z => format!("Z"),
+			PrevZ => format!("PrevZ"),
+			InitZ => format!("InitZ"),
+			UInt(n) => format!("{n}"),
+			Float(x) => format!("{x}"),
+			Complex(z) => format!("{z}"),
+			// 1 order
+			Neg(x) => format!("-({})", x.to_string()),
+			Abs(e) => format!("abs({})", e.to_string()),
+			Arg(e) => format!("arg({})", e.to_string()),
+			Exp(e) => format!("exp({})", e.to_string()),
+			Sqrt(e) => format!("sqrt({})", e.to_string()),
+			Sin(e) => format!("sin({})", e.to_string()),
+			Cos(e) => format!("cos({})", e.to_string()),
+			Tan(e) => format!("tan({})", e.to_string()),
+			Sinh(e) => format!("sinh({})", e.to_string()),
+			Cosh(e) => format!("cosh({})", e.to_string()),
+			Tanh(e) => format!("tanh({})", e.to_string()),
+			Ln(e) => format!("ln({})", e.to_string()),
+			// 2 order
+			Sum(box(l, r)) => format!("({}+{})", l.to_string(), r.to_string()), // es.into_iter().map(|e| e.to_string()).intersperse(format!("+")).collect(),
+			Prod(box(l, r)) => format!("({}*{})", l.to_string(), r.to_string()), // es.into_iter().map(|e| e.to_string()).intersperse(format!("*")).collect(),
+			Div(box(num, denom)) => format!("({})/({})", num.to_string(), denom.to_string()),
+			Pow(box(b, t)) => format!("({})^({})", b.to_string(), t.to_string()),
+			// _ => todo!()
+		}
+	}
+
+	fn new_random() -> Self {
+		let id = todo!();
+		Self::from_int(id)
+	}
+
+	fn from_u64(id: u64) -> Self {
+		Self::from_int(BigUint::from(id))
+	}
+
+	/*
+	example:
+
+	0 - z
+	1 - int
+	2 - sin
+	3 - sum
+
+	split n = use "snake" algo -> k, l
+
+	f n --> expr
+	0    z
+	1    int 0
+	2    sin (f 0) = sin z
+	3    sum (split 0) = sum(f 0, f 0) = sum z z
+	4    int 1
+	5    sin (f 1) = sin (int 0)
+	6    sum (split 1) = sum(f 0, f 1) = sum z (int 0)
+	7    int 2
+	8    sin (f 2) = sin (sin z)
+	9    sum (split 2) = sum(f 1, f 0) = sum (int 0) z
+	10   int 3
+	11   sin (f 3) = sin (sum z z)
+	12   sum (split 3) = sum(f 0, f 2) = sum z (sin z)
+	13   int 4
+	14   sin (f 4) = sin 1
+	15   sum (split 4) = sum(f 1, f 1) = sum (int 0) (int 0)
+	16   int 5
+	17   sin (f 5) = sin (sin (int 0))
+	18   sum (split 5) = sum(f 2, f 0) = sum (sin z) z
+	...
+	*/
+	fn from_int(id: BigUint) -> Self {
+		use Expr::*;
+		// dbg!(&id);
+		if id < BigUint::from(Self::NUMBER_OF_FINITE_VARIANTS) {
+			let id: u32 = *id.to_u32_digits().get(0).unwrap_or(&0);
+			match id {
+				0 => Z,
+				1 => PrevZ,
+				2 => InitZ,
+				_ => unreachable!()
+			}
+		}
+		else {
+			let id = id - Self::NUMBER_OF_FINITE_VARIANTS;
+			let id_inner = &id / Self::NUMBER_OF_INFINITE_VARIANTS;
+			let id_inner_u64: u64 = *id_inner.to_u64_digits().get(0).unwrap_or(&0);
+			// todo!("id=id-N or (id-N)%...?");
+			let id_mod: u32 = *(id % Self::NUMBER_OF_INFINITE_VARIANTS).to_u32_digits().get(0).unwrap_or(&0);
+			match id_mod {
+				0 => UInt(id_inner_u64),
+				1 => Float(float::from_bits(id_inner_u64)),
+				2 => {
+					let (k, l) = snake_split_2d_u64(id_inner_u64);
+					let u = f32::from_bits(k as u32) as float;
+					let v = f32::from_bits(l as u32) as float;
+					Complex(Complex64::new(u, v))
+				}
+				// 1 order
+				3 => Neg(bx(Self::from_int(id_inner))),
+				4 => Abs(bx(Self::from_int(id_inner))),
+				5 => Arg(bx(Self::from_int(id_inner))),
+				6 => Exp(bx(Self::from_int(id_inner))),
+				7 => Sqrt(bx(Self::from_int(id_inner))),
+				8 => Sin(bx(Self::from_int(id_inner))),
+				9 => Cos(bx(Self::from_int(id_inner))),
+				10=> Tan(bx(Self::from_int(id_inner))),
+				11 => Sinh(bx(Self::from_int(id_inner))),
+				12 => Cosh(bx(Self::from_int(id_inner))),
+				13 => Tanh(bx(Self::from_int(id_inner))),
+				14 => Ln(bx(Self::from_int(id_inner))),
+				// 2 order
+				15 => {
+					let (k, l) = snake_split_2d(id_inner);
+					let u = Self::from_int(k);
+					let v = Self::from_int(l);
+					Sum(bx((u, v)))
+				}
+				16 => {
+					let (k, l) = snake_split_2d(id_inner);
+					let u = Self::from_int(k);
+					let v = Self::from_int(l);
+					Prod(bx((u, v)))
+				}
+				17 => {
+					let (k, l) = snake_split_2d(id_inner);
+					let u = Self::from_int(k);
+					let v = Self::from_int(l);
+					Div(bx((u, v)))
+				}
+				18 => {
+					let (k, l) = snake_split_2d(id_inner);
+					let u = Self::from_int(k);
+					let v = Self::from_int(l);
+					Pow(bx((u, v)))
+				}
+				_ => unreachable!()
+			}
+		}
+	}
+
+	fn to_int(&self) -> u64 {
+		todo!()
+	}
+
+	fn contains_z(&self) -> bool {
+		use Expr::*;
+		match self {
+			Z => true,
+			PrevZ => false,
+			InitZ => false,
+			UInt(_n) => false,
+			Float(_x) => false,
+			Complex(_c) => false,
+			// 1 order
+			Neg(e) => e.contains_z(),
+			Abs(e) => e.contains_z(),
+			Arg(e) => e.contains_z(),
+			Exp(e) => e.contains_z(),
+			Sqrt(e) => e.contains_z(),
+			Sin(e) => e.contains_z(),
+			Cos(e) => e.contains_z(),
+			Tan(e) => e.contains_z(),
+			Sinh(e) => e.contains_z(),
+			Cosh(e) => e.contains_z(),
+			Tanh(e) => e.contains_z(),
+			Ln(e) => e.contains_z(),
+			// 2 order
+			Sum(box(l, r)) => l.contains_z() || r.contains_z(),
+			Prod(box(l, r)) => l.contains_z() || r.contains_z(),
+			Div(box(num, denom)) => num.contains_z() || denom.contains_z(),
+			Pow(box(b, t)) => b.contains_z() || t.contains_z(),
+		}
+	}
+}
+
+fn snake_split_2d(n: BigUint) -> (BigUint, BigUint) {
+	if n == BigUint::ZERO { return (BigUint::ZERO, BigUint::ZERO) }
+	/*
+	0  2  5  9  14 20 27 35
+	1  4  8  13 19 26 34
+	3  7  12 18 25 33
+	6  11 17 24 32
+	10 16 23 31
+	15 22 30
+	21 29
+	28
+	*/
+	let mut row_i = BigUint::ZERO;
+	let mut sum = BigUint::ZERO;
+	while &sum + &row_i < n {
+		row_i += BigUint::one();
+		sum += &row_i;
+	}
+	// dbg!(row_i, sum);
+	let delta = n - sum;
+	let k = delta.clone();
+	let l = row_i - delta;
+	(k, l)
+}
+
+fn snake_split_2d_u64(n: u64) -> (u64, u64) {
+	let (k, l) = snake_split_2d(BigUint::from(n));
+	let k = *k.to_u64_digits().get(0).unwrap_or(&0);
+	let l = *l.to_u64_digits().get(0).unwrap_or(&0);
+	(k, l)
+}
+
+#[cfg(test)]
+mod snake_split_2d_u64 {
+	use super::*;
+
+	#[test] fn _0() { assert_eq!(snake_split_2d_u64(0), (0, 0)) }
+
+	#[test] fn _1() { assert_eq!(snake_split_2d_u64(1), (0, 1)) }
+	#[test] fn _2() { assert_eq!(snake_split_2d_u64(2), (1, 0)) }
+
+	#[test] fn _3() { assert_eq!(snake_split_2d_u64(3), (0, 2)) }
+	#[test] fn _4() { assert_eq!(snake_split_2d_u64(4), (1, 1)) }
+	#[test] fn _5() { assert_eq!(snake_split_2d_u64(5), (2, 0)) }
+
+	#[test] fn _6() { assert_eq!(snake_split_2d_u64(6), (0, 3)) }
+	#[test] fn _7() { assert_eq!(snake_split_2d_u64(7), (1, 2)) }
+	#[test] fn _8() { assert_eq!(snake_split_2d_u64(8), (2, 1)) }
+	#[test] fn _9() { assert_eq!(snake_split_2d_u64(9), (3, 0)) }
+
+	#[test] fn _10() { assert_eq!(snake_split_2d_u64(10), (0, 4)) }
+	#[test] fn _11() { assert_eq!(snake_split_2d_u64(11), (1, 3)) }
+	#[test] fn _12() { assert_eq!(snake_split_2d_u64(12), (2, 2)) }
+	#[test] fn _13() { assert_eq!(snake_split_2d_u64(13), (3, 1)) }
+	#[test] fn _14() { assert_eq!(snake_split_2d_u64(14), (4, 0)) }
+
+	#[test] fn _15() { assert_eq!(snake_split_2d_u64(15), (0, 5)) }
+	#[test] fn _16() { assert_eq!(snake_split_2d_u64(16), (1, 4)) }
+	#[test] fn _17() { assert_eq!(snake_split_2d_u64(17), (2, 3)) }
+	#[test] fn _18() { assert_eq!(snake_split_2d_u64(18), (3, 2)) }
+	#[test] fn _19() { assert_eq!(snake_split_2d_u64(19), (4, 1)) }
+	#[test] fn _20() { assert_eq!(snake_split_2d_u64(20), (5, 0)) }
+}
+
+
+
+#[cfg(test)]
+mod expr_from_int {
+	use super::*;
+	use Expr::*;
+	#[test] fn _0() { assert_eq!(Expr::from_u64(0), Z) }
+	#[test] fn _1() { assert_eq!(Expr::from_u64(1), PrevZ) }
+	#[test] fn _2() { assert_eq!(Expr::from_u64(2), InitZ) }
+
+	#[test] fn _3() { assert_eq!(Expr::from_u64(3), UInt(0)) }
+	#[test] fn _4() { assert_eq!(Expr::from_u64(4), Float(0.)) }
+	#[test] fn _5() { assert_eq!(Expr::from_u64(5), Complex(cf(0., 0.))) }
+	#[test] fn _6() { assert_eq!(Expr::from_u64(6), Neg(bx(Z))) }
+	#[test] fn _7() { assert_eq!(Expr::from_u64(7), Abs(bx(Z))) }
+	#[test] fn _8() { assert_eq!(Expr::from_u64(8), Arg(bx(Z))) }
+	#[test] fn _9() { assert_eq!(Expr::from_u64(9), Exp(bx(Z))) }
+	#[test] fn _10() { assert_eq!(Expr::from_u64(10), Sqrt(bx(Z))) }
+	#[test] fn _11() { assert_eq!(Expr::from_u64(11), Sin(bx(Z))) }
+	#[test] fn _12() { assert_eq!(Expr::from_u64(12), Cos(bx(Z))) }
+	#[test] fn _13() { assert_eq!(Expr::from_u64(13), Tan(bx(Z))) }
+	#[test] fn _14() { assert_eq!(Expr::from_u64(14), Sinh(bx(Z))) }
+	#[test] fn _15() { assert_eq!(Expr::from_u64(15), Cosh(bx(Z))) }
+	#[test] fn _16() { assert_eq!(Expr::from_u64(16), Tanh(bx(Z))) }
+	#[test] fn _17() { assert_eq!(Expr::from_u64(17), Ln(bx(Z))) }
+	#[test] fn _18() { assert_eq!(Expr::from_u64(18), Sum(bx((Z, Z)))) }
+	#[test] fn _19() { assert_eq!(Expr::from_u64(19), Prod(bx((Z, Z)))) }
+	#[test] fn _20() { assert_eq!(Expr::from_u64(20), Div(bx((Z, Z)))) }
+	#[test] fn _21() { assert_eq!(Expr::from_u64(21), Pow(bx((Z, Z)))) }
+
+	#[test] fn _22() { assert_eq!(Expr::from_u64(22), UInt(1)) }
+	#[test] fn _23() { assert_eq!(Expr::from_u64(23), Float(5e-324)) }
+	#[test] fn _24() { assert_eq!(Expr::from_u64(24), Complex(cf(0., 1.401298464324817e-45))) }
+	#[test] fn _25() { assert_eq!(Expr::from_u64(25), Neg(bx(PrevZ))) }
+	#[test] fn _26() { assert_eq!(Expr::from_u64(26), Abs(bx(PrevZ))) }
+	#[test] fn _27() { assert_eq!(Expr::from_u64(27), Arg(bx(PrevZ))) }
+	#[test] fn _28() { assert_eq!(Expr::from_u64(28), Exp(bx(PrevZ))) }
+	#[test] fn _29() { assert_eq!(Expr::from_u64(29), Sqrt(bx(PrevZ))) }
+	#[test] fn _30() { assert_eq!(Expr::from_u64(30), Sin(bx(PrevZ))) }
+	#[test] fn _31() { assert_eq!(Expr::from_u64(31), Cos(bx(PrevZ))) }
+	#[test] fn _32() { assert_eq!(Expr::from_u64(32), Tan(bx(PrevZ))) }
+	#[test] fn _33() { assert_eq!(Expr::from_u64(33), Sinh(bx(PrevZ))) }
+	#[test] fn _34() { assert_eq!(Expr::from_u64(34), Cosh(bx(PrevZ))) }
+	#[test] fn _35() { assert_eq!(Expr::from_u64(35), Tanh(bx(PrevZ))) }
+	#[test] fn _36() { assert_eq!(Expr::from_u64(36), Ln(bx(PrevZ))) }
+	#[test] fn _37() { assert_eq!(Expr::from_u64(37), Sum(bx((Z, PrevZ)))) }
+	#[test] fn _38() { assert_eq!(Expr::from_u64(38), Prod(bx((Z, PrevZ)))) }
+	#[test] fn _39() { assert_eq!(Expr::from_u64(39), Div(bx((Z, PrevZ)))) }
+	#[test] fn _40() { assert_eq!(Expr::from_u64(40), Pow(bx((Z, PrevZ)))) }
+
+	#[test] fn _41() { assert_eq!(Expr::from_u64(41), UInt(2)) }
+	#[test] fn _42() { assert_eq!(Expr::from_u64(42), Float(1e-323)) }
+	#[test] fn _43() { assert_eq!(Expr::from_u64(43), Complex(cf(1.401298464324817e-45, 0.))) }
+	#[test] fn _44() { assert_eq!(Expr::from_u64(44), Neg(bx(InitZ))) }
+	#[test] fn _45() { assert_eq!(Expr::from_u64(45), Abs(bx(InitZ))) }
+	#[test] fn _46() { assert_eq!(Expr::from_u64(46), Arg(bx(InitZ))) }
+	#[test] fn _47() { assert_eq!(Expr::from_u64(47), Exp(bx(InitZ))) }
+	#[test] fn _48() { assert_eq!(Expr::from_u64(48), Sqrt(bx(InitZ))) }
+	#[test] fn _49() { assert_eq!(Expr::from_u64(49), Sin(bx(InitZ))) }
+	#[test] fn _50() { assert_eq!(Expr::from_u64(50), Cos(bx(InitZ))) }
+	#[test] fn _51() { assert_eq!(Expr::from_u64(51), Tan(bx(InitZ))) }
+	#[test] fn _52() { assert_eq!(Expr::from_u64(52), Sinh(bx(InitZ))) }
+	#[test] fn _53() { assert_eq!(Expr::from_u64(53), Cosh(bx(InitZ))) }
+	#[test] fn _54() { assert_eq!(Expr::from_u64(54), Tanh(bx(InitZ))) }
+	#[test] fn _55() { assert_eq!(Expr::from_u64(55), Ln(bx(InitZ))) }
+	#[test] fn _56() { assert_eq!(Expr::from_u64(56), Sum(bx((PrevZ, Z)))) }
+	#[test] fn _57() { assert_eq!(Expr::from_u64(57), Prod(bx((PrevZ, Z)))) }
+	#[test] fn _58() { assert_eq!(Expr::from_u64(58), Div(bx((PrevZ, Z)))) }
+	#[test] fn _59() { assert_eq!(Expr::from_u64(59), Pow(bx((PrevZ, Z)))) }
+
+	#[test] fn _60() { assert_eq!(Expr::from_u64(60), UInt(3)) }
+	#[test] fn _61() { assert_eq!(Expr::from_u64(61), Float(1.5e-323)) }
+	#[test] fn _62() { assert_eq!(Expr::from_u64(62), Complex(cf(0., 2.802596928649634e-45))) }
+	#[test] fn _63() { assert_eq!(Expr::from_u64(63), Neg(bx(UInt(0)))) }
+	#[test] fn _64() { assert_eq!(Expr::from_u64(64), Abs(bx(UInt(0)))) }
+	#[test] fn _65() { assert_eq!(Expr::from_u64(65), Arg(bx(UInt(0)))) }
+	#[test] fn _66() { assert_eq!(Expr::from_u64(66), Exp(bx(UInt(0)))) }
+	#[test] fn _67() { assert_eq!(Expr::from_u64(67), Sqrt(bx(UInt(0)))) }
+	#[test] fn _68() { assert_eq!(Expr::from_u64(68), Sin(bx(UInt(0)))) }
+	#[test] fn _69() { assert_eq!(Expr::from_u64(69), Cos(bx(UInt(0)))) }
+	#[test] fn _70() { assert_eq!(Expr::from_u64(70), Tan(bx(UInt(0)))) }
+	#[test] fn _71() { assert_eq!(Expr::from_u64(71), Sinh(bx(UInt(0)))) }
+	#[test] fn _72() { assert_eq!(Expr::from_u64(72), Cosh(bx(UInt(0)))) }
+	#[test] fn _73() { assert_eq!(Expr::from_u64(73), Tanh(bx(UInt(0)))) }
+	#[test] fn _74() { assert_eq!(Expr::from_u64(74), Ln(bx(UInt(0)))) }
+	#[test] fn _75() { assert_eq!(Expr::from_u64(75), Sum(bx((Z, InitZ)))) }
+	#[test] fn _76() { assert_eq!(Expr::from_u64(76), Prod(bx((Z, InitZ)))) }
+	#[test] fn _77() { assert_eq!(Expr::from_u64(77), Div(bx((Z, InitZ)))) }
+	#[test] fn _78() { assert_eq!(Expr::from_u64(78), Pow(bx((Z, InitZ)))) }
+
+	/*
+	Z,
+	PrevZ,
+	InitZ,
+	// infinite variants:
+	Int(i64),
+	Float(float),
+	Complex(Complex64),
+	// 1 order
+	Neg(Box<Expr>),
+	Abs(Box<Expr>),
+	Arg(Box<Expr>),
+	Exp(Box<Expr>),
+	Sqrt(Box<Expr>),
+	Sin(Box<Expr>),
+	Cos(Box<Expr>),
+	Tan(Box<Expr>),
+	Sinh(Box<Expr>),
+	Cosh(Box<Expr>),
+	Tanh(Box<Expr>),
+	Ln(Box<Expr>),
+	// 2 order
+	Sum(Vec<Expr>),
+	Prod(Vec<Expr>),
+	Div { num_denom: Box<(Expr, Expr)> },
+	Pow { b_t: Box<(Expr, Expr)> },
+	*/
+}
 
