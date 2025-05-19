@@ -5,21 +5,113 @@
 	iter_intersperse,
 )]
 
-#![deny(unreachable_patterns)]
+#![deny(
+	unreachable_patterns,
+	unsafe_code,
+)]
 
-use minifb::{Key, Window, WindowOptions};
+use std::str::FromStr;
+
+use clap::{Parser, arg};
+use minifb::{Key, KeyRepeat, Window, WindowOptions};
 use num::{complex::{Complex64, ComplexFloat}, BigUint, One, Zero};
 use rand::{rng, Rng};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 
 mod utils_io;
 
-use utils_io::prompt;
-
 
 
 const MOVE_STEP: float = 0.1;
 const ZOOM_STEP: float = 1.1;
+
+#[derive(Parser, Debug)]
+#[clap(
+	about,
+	author,
+	version,
+	help_template = "\
+		{before-help}{name} {version}\n\
+		{about}\n\
+		Author: {author}\n\
+		\n\
+		{usage-heading} {usage}\n\
+		\n\
+		{all-args}{after-help}\
+	",
+)]
+struct CliArgs {
+	fractal_id: Option<String>,
+
+	/// TODO
+	#[arg(short='s', long, default_value_t=false)]
+	assign_zesc_once: bool,
+
+	/// TODO
+	#[arg(short='b', long, default_value_t=false)]
+	break_loop: bool,
+
+	/// TODO
+	#[arg(short='e', long, default_value_t=100.)]
+	zesc_value: float,
+
+	/// TODO
+	#[arg(short='b', long, default_value_t=false)]
+	high_quality: bool,
+
+	/// TODO
+	#[arg(short='b', long, default_value_t=false)]
+	keys_repeat: bool,
+}
+
+struct Params {
+	fractal: (BigUint, Expr),
+	assign_zesc_once: bool,
+	break_loop: bool,
+	zesc_value: float,
+	quality: Quality,
+	keys_repeat: bool,
+}
+impl From<CliArgs> for Params {
+	fn from(CliArgs {
+		fractal_id,
+		assign_zesc_once,
+		break_loop,
+		zesc_value,
+		high_quality,
+		keys_repeat,
+	}: CliArgs) -> Self {
+		Self {
+			fractal: {
+				if let Some(fractal_id) = fractal_id {
+					let id = BigUint::from_str(&fractal_id).unwrap();
+					let expr = Expr::from_int(id.clone());
+					(id, expr)
+				} else {
+					let mut rng = rng();
+					loop {
+						const N_MAX_DIGITS: u32 = 9;
+						let digits: u32 = rng.random_range(1 ..= N_MAX_DIGITS);
+						let id: u64 = if digits == 1 {
+							rng.random_range(0 ..= 9)
+						} else {
+							rng.random_range(10_u64.pow(digits-1) .. 10_u64.pow(digits))
+						};
+						let expr = Expr::from_u64(id);
+						if expr.contains_z() {
+							break (BigUint::from(id), expr);
+						}
+					}
+				}
+			},
+			assign_zesc_once,
+			break_loop,
+			zesc_value,
+			quality: if high_quality { Quality(10) } else { Quality(0) },
+			keys_repeat,
+		}
+	}
+}
 
 
 
@@ -48,36 +140,10 @@ fn main() {
 	// #[allow(unreachable_code)]
 	// return;
 
-	let mut rng = rng();
+	let cli_args = CliArgs::parse();
 
-	// mandelbrot -> 4768
-	const PROMPT_STR: &str = "Input Fractal Number (default is random): ";
-	let user_input = prompt(PROMPT_STR);
-	let (n, expr) = if user_input != "" {
-		let mut user_input = user_input;
-		loop {
-			if let Ok(n) = user_input.parse::<BigUint>() {
-				let expr = Expr::from_int(n.clone());
-				break (n, expr);
-			}
-			user_input = prompt(PROMPT_STR);
-		}
-	} else {
-		loop {
-			const N_MAX_DIGITS: u32 = 9;
-			let digits: u32 = rng.random_range(1 ..= N_MAX_DIGITS);
-			let n: u64 = if digits == 1 {
-				rng.random_range(0 ..= 9)
-			} else {
-				rng.random_range(10_u64.pow(digits-1) .. 10_u64.pow(digits))
-			};
-			let expr = Expr::from_u64(n);
-			if expr.contains_z() {
-				break (BigUint::from(n), expr);
-			}
-		}
-	};
-	println!("{n} -> {}", expr.to_string());
+	let mut params: Params = cli_args.into();
+	println!("{} -> {}", params.fractal.0, params.fractal.1.to_string());
 
 	let (mut w, mut h) = (320, 240);
 	let (mut wf, mut hf) = (w as float, h as float);
@@ -96,12 +162,11 @@ fn main() {
 	window.set_target_fps(60);
 	window.update_with_buffer(&buffer, w, h).unwrap();
 
-	let mut frame_i: u64 = 0;
-
-	let mut zoom: float = 1.0;
+	let mut zoom : float = 1.0;
 	let mut cam_x: float = 0.0;
 	let mut cam_y: float = 0.0;
 
+	// let mut frame_i: u64 = 0;
 	while window.is_open() && !window.is_key_down(Key::Escape) {
 		let mut is_redraw_needed: bool = false;
 
@@ -131,6 +196,41 @@ fn main() {
 		}
 		if window.is_key_down(Key::Down)  || window.is_key_down(Key::J) || window.is_key_down(Key::S) {
 			cam_y += move_speed;
+			is_redraw_needed = true;
+		}
+
+		if window.is_key_pressed(Key::Space, KeyRepeat::No) {
+			params.keys_repeat = !params.keys_repeat;
+		}
+
+		if window.is_key_pressed_or_down(Key::Q, params.keys_repeat) {
+			params.quality.decrease();
+			println!("quality: {:?}", params.quality);
+			is_redraw_needed = true;
+		}
+		if window.is_key_pressed_or_down(Key::E, params.keys_repeat) {
+			params.quality.increase();
+			println!("quality: {:?}", params.quality);
+			is_redraw_needed = true;
+		}
+
+		if window.is_key_pressed_or_down(Key::N, params.keys_repeat) {
+			params.fractal.0 += 1_u32;
+			params.fractal.1 = Expr::from_int(params.fractal.0.clone());
+			println!("{} -> {}", params.fractal.0, params.fractal.1.to_string());
+			is_redraw_needed = true;
+		}
+		if window.is_key_pressed_or_down(Key::P, params.keys_repeat) {
+			params.fractal.0 -= 1_u32;
+			params.fractal.1 = Expr::from_int(params.fractal.0.clone());
+			println!("{} -> {}", params.fractal.0, params.fractal.1.to_string());
+			is_redraw_needed = true;
+		}
+
+		if window.is_key_pressed_or_down(Key::R, params.keys_repeat) {
+			zoom  = 1.0;
+			cam_x = 0.0;
+			cam_y = 0.0;
 			is_redraw_needed = true;
 		}
 
@@ -174,19 +274,23 @@ fn main() {
 					let mut z_esc = Complex64::zero();
 					let mut is_bounded = true;
 					let mut escape_iter_n: u32 = 0;
-					let n_iters: u32 = zoom_to_iters_n(zoom);
+					let n_iters: u32 = params.quality.zoom_to_iters_n(zoom);
 					for j in 0..n_iters {
 						if !z.is_nan() {
 							z_last_not_nan = z;
 						}
-						let z_new = expr.eval(z, z_prev, z_init);
+						let z_new = params.fractal.1.eval(z, z_prev, z_init);
 						z_prev = z;
 						z = z_new;
-						if (z.norm() > 100. || z.is_nan()) && is_bounded {
+						let z_check = z.norm() > params.zesc_value || z.is_nan();
+						let is_bounded_check = if params.assign_zesc_once { is_bounded } else { true };
+						if z_check && is_bounded_check {
 							is_bounded = false;
 							escape_iter_n = j;
 							z_esc = z;
-							// break;
+							if params.break_loop {
+								break;
+							}
 						}
 					}
 					let color = if is_bounded { BLACK } else {
@@ -300,9 +404,27 @@ impl FloatToColor {
 }
 
 
-fn zoom_to_iters_n(zoom: float) -> u32 {
-	20 + (zoom.log(1.1) as u32)
+
+
+
+#[derive(Debug)]
+struct Quality(i32);
+impl Quality {
+	fn zoom_to_iters_n(&self, zoom: float) -> u32 {
+		let quality = self.0 as float;
+		let log_base: float = 1. + (-quality / 5.).exp();
+		20 + (zoom.log(log_base) as u32)
+	}
+
+	fn increase(&mut self) {
+		self.0 += 1;
+	}
+
+	fn decrease(&mut self) {
+		self.0 -= 1;
+	}
 }
+
 
 
 struct STW {
@@ -323,6 +445,20 @@ fn screen_to_world(STW { x, y, wf, hf, zoom, cam_x, cam_y }: STW) -> (float, flo
 	(world_x, world_y)
 }
 
+
+
+trait WindowExtIsKeyPressedOrDown {
+	fn is_key_pressed_or_down(&self, key: Key, repeat: bool) -> bool;
+}
+impl WindowExtIsKeyPressedOrDown for Window {
+	fn is_key_pressed_or_down(&self, key: Key, repeat: bool) -> bool {
+		if repeat {
+			self.is_key_down(key)
+		} else {
+			self.is_key_pressed(key, KeyRepeat::No)
+		}
+	}
+}
 
 
 
