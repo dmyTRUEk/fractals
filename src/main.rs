@@ -31,7 +31,7 @@ const ZOOM_STEP: float = 1.1;
 	author,
 	version,
 	help_template = "\
-		{before-help}{name} {version}\n\
+		{before-help}{name} v{version}\n\
 		{about}\n\
 		Author: {author}\n\
 		\n\
@@ -127,14 +127,15 @@ fn main() {
 	// };
 	// let fractal_x: Expr = {
 	// 	use Expr::*;
-	// 	//
-	// 	todo!()
+	// 	// 7134919 -> cosh(0e0+0e0i)/cosh(Z/PrevZ)
+	// 	// Div(bx((Cosh(bx(UInt(0_u32.into()))), Cosh(bx(Div(bx((Z, PrevZ)))))))) // 6522302
+	// 	Div(bx((UInt(1_u32.into()), Cosh(bx(Div(bx((Z, PrevZ)))))))) // 5758027
 	// };
 	// for n in 0_u128.. {
 	// 	// let n: BigUint = prompt("Expr N: ").parse().unwrap();
-	// 	let n = BigUint::from(n);
-	// 	let expr = Expr::from_int(n.clone());
-	// 	println!("{} -> {}", n, expr.to_string());
+	// 	let id = BigUint::from(n);
+	// 	let expr = Expr::from_int(id.clone());
+	// 	println!("{} -> {}", id, expr.to_string());
 	// 	if expr == fractal_x { break }
 	// }
 	// #[allow(unreachable_code)]
@@ -512,6 +513,8 @@ enum Expr {
 	Div(Box<(Expr, Expr)>),
 	Pow(Box<(Expr, Expr)>),
 	// WARNING: IF CHANGED UPDATE CONSTS
+
+	// TODO: I, Conj, Re, Im
 }
 impl Expr {
 	// WARNING: UPDATE HERE IF ENUM CHANGED
