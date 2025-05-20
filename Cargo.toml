@@ -1,8 +1,22 @@
 [package]
 name = "fractals"
-version = "1.1.1"
+version = "2.0.0"
 edition = "2024"
 authors = ["dmyTRUEk"]
+homepage   = "https://github.com/dmyTRUEk/fractals"
+repository = "https://github.com/dmyTRUEk/fractals"
+description = """\
+Render fractal from Id.
+
+Controls:
+Arrows, WASD, HJKL		camera movement
+ZX, IO            		zoom in/out
+R                 		reset camera and zoom
+EQ                		inc/dec render quality
+NP                		next/prev fractal by its Id
+B                 		toggle `break_loop`
+Y                 		toggle `assign_zesc_once`
+Space             		toggle some keys repeat mode"""
 
 [profile.release]
 opt-level = 3

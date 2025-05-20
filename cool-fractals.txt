@@ -1,3 +1,28 @@
-4768 -> ((Z*Z)+InitZ) // mandelbrot
-72458 -> sin(tan(sqrt(sqrt(Z))))
-6163501394283958681 // deep fried
+in v1:
+4768 -> Z*Z+InitZ // mandelbrot
+898512 -> sin(Z)^sin(cosh(Z)) // first/necklace
+539614 -> sinh(sinh(cos(Z^InitZ))) // test one
+72458 -> sin(tan(sqrt(sqrt(Z)))) // yellow doublecircles
+8019 -> cosh(Z)/tan(Z) // yellow rhombus
+78 -> Z^InitZ // simple origami
+571400280 -> Z*Z/arg(Z)+0/Z // eye of the universe
+56100778 -> sqrt(cosh(cos(InitZ)^(Z/InitZ))) // amoebas
+50169 -> exp(InitZ+sinh(Z))
+807078362 -> sqrt( (3e-323) ^ (tan(Z)/Z) ) // industrial
+6163501394283958681 -> sqrt(exp(-sin((exp(sin(arg(tanh(exp(Z))))))/(sinh((0e0+2.802596928649634e-45i)/exp(Z)))))) // deep fried
+5758027 -> 1/cosh(Z/PrevZ)
+
+in v2:
+19468 -> Z*Z+InitZ // mandelbrot
+6599748 -> Sin(Z)^Sin(Cosh(Z)) // first/necklace
+3800402 -> Sinh(Sinh(Cos((Z)^(InitZ)))) // test one
+461854 -> Sin(Tan(Sqrt(Sqrt(Z)))) // yellow doublecircles
+23624 -> Cosh(Z)/Tan(Z) // yellow rhombus
+127 -> Z^InitZ // simple origami
+27716 -> Z*Z/Arg(Z) // eye of the universe
+631423763 -> Sqrt(Cosh(Cos(InitZ)^(Z/InitZ))) // amoebas
+224887 -> Exp((InitZ+Sinh(Z)))
+17782995666 -> Sqrt((3e-323)^((Tan(Z))/(Z))) // industrial
+5068999765375641605082 -> Sqrt(Exp(-Sin((Exp(Sin(Arg(Tanh(Exp(Z))))))/(Sinh((0e0+2.802596928649634e-45i)/Exp(Z)))))) // deep fried
+64474298 -> 1/Cosh(Z/PrevZ) // yellow deamon
+40767528629404893533912019020184348823119365583082306616299 -> (|Re(Z)|+i|Im(Z)|)^2 + InitZ // burning ship
