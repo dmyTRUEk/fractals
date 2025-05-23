@@ -928,6 +928,7 @@ impl FromStr for Expr {
 			"z" => return Ok(Z),
 			"zinit" | "initz" => return Ok(InitZ),
 			"zprev" | "prevz" => return Ok(PrevZ),
+			"i" => return Ok(I),
 			_ => {}
 		}
 		if let Ok(n) = u64::from_str(s) { return Ok(UInt(n)) }
