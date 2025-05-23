@@ -43,8 +43,8 @@ const ZOOM_STEP: float = 1.1;
 	",
 )]
 struct CliArgs {
-	/// [optional]
-	fractal_id: Option<String>,
+	/// [optional] fractal Id or expression
+	fractal: Option<String>,
 
 	// TODO
 	#[arg(short='s', long, default_value_t=false)]
@@ -62,9 +62,9 @@ struct CliArgs {
 	#[arg(short='r', long, default_value_t=false)]
 	keys_repeat: bool,
 
-	// TODO: search id of formula
-	// #[arg(short='s', long, default_value=None)]
-	// search_id_of: Option<String>,
+	// TODO
+	#[arg(short='n', long, default_value=None)]
+	get_id_of: Option<String>,
 
 	// TODO: render fractal to imgs/vid
 }
@@ -79,19 +79,25 @@ struct Params {
 }
 impl From<CliArgs> for Params {
 	fn from(CliArgs {
-		fractal_id,
+		fractal,
 		assign_zesc_once,
 		break_loop,
 		zesc_value,
 		keys_repeat,
+		get_id_of: _,
 	}: CliArgs) -> Self {
 		Self {
 			fractal: {
-				if let Some(fractal_id) = fractal_id {
+				if let Some(fractal) = fractal {
 					// TODO: base36
-					let id = BigUint::from_str(&fractal_id).unwrap();
-					let expr = Expr::from_int(&id);
-					(id, expr)
+					if let Ok(id) = BigUint::from_str(&fractal) {
+						let expr = Expr::from_int(&id);
+						(id, expr)
+					} else {
+						let expr = Expr::from_str(&fractal).unwrap();
+						let id = expr.to_int();
+						(id, expr)
+					}
 				} else {
 					let mut rng = rng();
 					loop {
@@ -150,8 +156,8 @@ fn main() {
 	// };
 	// let fractal_x: Expr = {
 	// 	use Expr::*;
-	// 	// sqrt(exp(-(sin((exp(sin(arg(tanh(exp(Z))))))/(sinh((0e0+2.802596928649634e-45i)/(exp(Z))))))))
-	// 	Sqrt(bx(Exp(bx(Neg(bx(Sin(bx( Div(bx((Exp(bx(Sin(bx(Arg(bx(Tanh(bx(Exp(bx(Z)))))))))), Sinh(bx( Div(bx((Complex(cf(0e0,2.802596928649634e-45)), Exp(bx(Z))))) )) ))) ))))))))
+	// 	// 3*Z+1
+	// 	Sum(bx((Prod(bx((UInt(3), Z))), UInt(1))))
 	// };
 	// let id = fractal_x.to_int();
 	// println!("id: {id}");
@@ -161,6 +167,16 @@ fn main() {
 	// return;
 
 	let cli_args = CliArgs::parse();
+
+	if let Some(expr_str) = cli_args.get_id_of {
+		let expr = Expr::from_str(&expr_str).unwrap();
+		let id = expr.to_int();
+		println!("id: {id}");
+		let expr_from_id = Expr::from_int(&id);
+		assert_eq!(expr, expr_from_id, "expr from str != expr from int, which is bad...");
+		println!("{} -> {}", id, expr_from_id.to_string());
+		return
+	}
 
 	let mut params: Params = cli_args.into();
 	println!("{} -> {}", params.fractal.0, params.fractal.1.to_string());
@@ -599,51 +615,6 @@ impl Expr {
 		}
 	}
 
-	fn to_string(&self) -> String {
-		use Expr::*;
-		match self {
-			// 0 order
-			Z     => format!("Z"),
-			PrevZ => format!("PrevZ"),
-			InitZ => format!("InitZ"),
-			I     => format!("I"),
-			UInt(n)    => format!("{n}"),
-			Float(x)   => format!("{x:e}"),
-			Complex(z) => format!("{z:e}"),
-			// 1 order
-			Neg(e)   => format!("-({})", e.to_string()),
-			Abs(e)   => format!("Abs({})", e.to_string()),
-			Arg(e)   => format!("Arg({})", e.to_string()),
-			Re(e)    => format!("Re({})", e.to_string()),
-			Im(e)    => format!("Im({})", e.to_string()),
-			Conj(e)  => format!("Conj({})", e.to_string()),
-			Exp(e)   => format!("Exp({})", e.to_string()),
-			Ln(e)    => format!("Ln({})", e.to_string()),
-			Sqrt(e)  => format!("Sqrt({})", e.to_string()),
-			Sin(e)   => format!("Sin({})", e.to_string()),
-			Cos(e)   => format!("Cos({})", e.to_string()),
-			Tan(e)   => format!("Tan({})", e.to_string()),
-			Sinh(e)  => format!("Sinh({})", e.to_string()),
-			Cosh(e)  => format!("Cosh({})", e.to_string()),
-			Tanh(e)  => format!("Tanh({})", e.to_string()),
-			Asin(e)  => format!("Asin({})", e.to_string()),
-			Acos(e)  => format!("Acos({})", e.to_string()),
-			Atan(e)  => format!("Atan({})", e.to_string()),
-			Asinh(e) => format!("Asinh({})", e.to_string()),
-			Acosh(e) => format!("Acosh({})", e.to_string()),
-			Atanh(e) => format!("Atanh({})", e.to_string()),
-			Round(e) => format!("Round({})", e.to_string()),
-			Ceil(e)  => format!("Ceil({})", e.to_string()),
-			Floor(e) => format!("Floor({})", e.to_string()),
-			// 2 order
-			Sum(box(l, r))       => format!("({}+{})", l.to_string(), r.to_string()), // es.into_iter().map(|e| e.to_string()).intersperse(format!("+")).collect(),
-			Prod(box(l, r))      => format!("({}*{})", l.to_string(), r.to_string()), // es.into_iter().map(|e| e.to_string()).intersperse(format!("*")).collect(),
-			Div(box(num, denom)) => format!("({})/({})", num.to_string(), denom.to_string()),
-			Pow(box(b, t))       => format!("({})^({})", b.to_string(), t.to_string()),
-			// _ => todo!()
-		}
-	}
-
 	fn new_random() -> Self {
 		let id = todo!();
 		Self::from_int(id)
@@ -870,6 +841,290 @@ impl Expr {
 	}
 }
 
+impl ToString for Expr {
+	fn to_string(&self) -> String {
+		use Expr::*;
+		match self {
+			// 0 order
+			Z     => format!("Z"),
+			PrevZ => format!("PrevZ"),
+			InitZ => format!("InitZ"),
+			I     => format!("I"),
+			UInt(n)    => format!("{n}"),
+			Float(x)   => format!("{x:e}"),
+			Complex(z) => format!("{z:e}"),
+			// 1 order
+			Neg(e)   => format!("-({})", e.to_string()),
+			Abs(e)   => format!("Abs({})", e.to_string()),
+			Arg(e)   => format!("Arg({})", e.to_string()),
+			Re(e)    => format!("Re({})", e.to_string()),
+			Im(e)    => format!("Im({})", e.to_string()),
+			Conj(e)  => format!("Conj({})", e.to_string()),
+			Exp(e)   => format!("Exp({})", e.to_string()),
+			Ln(e)    => format!("Ln({})", e.to_string()),
+			Sqrt(e)  => format!("Sqrt({})", e.to_string()),
+			Sin(e)   => format!("Sin({})", e.to_string()),
+			Cos(e)   => format!("Cos({})", e.to_string()),
+			Tan(e)   => format!("Tan({})", e.to_string()),
+			Sinh(e)  => format!("Sinh({})", e.to_string()),
+			Cosh(e)  => format!("Cosh({})", e.to_string()),
+			Tanh(e)  => format!("Tanh({})", e.to_string()),
+			Asin(e)  => format!("Asin({})", e.to_string()),
+			Acos(e)  => format!("Acos({})", e.to_string()),
+			Atan(e)  => format!("Atan({})", e.to_string()),
+			Asinh(e) => format!("Asinh({})", e.to_string()),
+			Acosh(e) => format!("Acosh({})", e.to_string()),
+			Atanh(e) => format!("Atanh({})", e.to_string()),
+			Round(e) => format!("Round({})", e.to_string()),
+			Ceil(e)  => format!("Ceil({})", e.to_string()),
+			Floor(e) => format!("Floor({})", e.to_string()),
+			// 2 order
+			Sum(box(l, r))       => format!("({}+{})", l.to_string(), r.to_string()), // es.into_iter().map(|e| e.to_string()).intersperse(format!("+")).collect(),
+			Prod(box(l, r))      => format!("({}*{})", l.to_string(), r.to_string()), // es.into_iter().map(|e| e.to_string()).intersperse(format!("*")).collect(),
+			Div(box(num, denom)) => format!("({})/({})", num.to_string(), denom.to_string()),
+			Pow(box(b, t))       => format!("({})^({})", b.to_string(), t.to_string()),
+			// _ => todo!()
+		}
+	}
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ExprFromStrErr {
+	BadBracketsSequence,
+	BracketClosingBeforeOpeningAt { index: usize },
+	BadExpression,
+}
+impl ToString for ExprFromStrErr {
+	fn to_string(&self) -> String {
+		match self {
+			Self::BadBracketsSequence => format!("bad brackets sequence"),
+			Self::BracketClosingBeforeOpeningAt { index } => format!("closing bracket before opening at index {index}"),
+			Self::BadExpression => format!("bad expression"),
+		}
+	}
+}
+impl ExprFromStrErr {
+	fn shift_index_by(mut self, delta: usize) -> Self {
+		match &mut self {
+			Self::BracketClosingBeforeOpeningAt { index } => {
+				*index += delta;
+			}
+			_ => {}
+		}
+		self
+	}
+}
+
+impl FromStr for Expr {
+	type Err = ExprFromStrErr;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		use Expr::*;
+		// dbg!(s);
+		let s: &str = &s.trim().to_lowercase();
+		if s.starts_with('(') && s.ends_with(')') {
+			return Self::from_str(&s[1..s.len()-1])
+		}
+		match s {
+			"z" => return Ok(Z),
+			"zinit" | "initz" => return Ok(InitZ),
+			"zprev" | "prevz" => return Ok(PrevZ),
+			_ => {}
+		}
+		if let Ok(n) = u64::from_str(s) { return Ok(UInt(n)) }
+		if let Ok(x) = float::from_str(s) { return Ok(Float(x)) }
+		if let Ok(z) = Complex64::from_str(s) { return Ok(Complex(z)) }
+
+		let mut level: i32 = 0;
+		let mut index_of_lb: Option<usize> = None;
+		let mut index_of_rb: Option<usize> = None;
+		let mut index_of_plus: Option<usize> = None;
+		let mut index_of_minus: Option<usize> = None;
+		let mut index_of_mul: Option<usize> = None;
+		let mut index_of_div: Option<usize> = None;
+		let mut index_of_pow: Option<usize> = None;
+		for (i, c) in s.chars().enumerate() {
+			match c {
+				'(' => {
+					if level == 0 && index_of_lb.is_none() {
+						index_of_lb = Some(i);
+					}
+					level += 1;
+				}
+				')' => {
+					if level == 0 && index_of_rb.is_none() {
+						index_of_rb = Some(i);
+					}
+					level -= 1;
+				}
+				'+' if level == 0 && index_of_plus.is_none() => { index_of_plus = Some(i) }
+				'-' if level == 0 && index_of_minus.is_none() => { index_of_minus = Some(i) }
+				'*' if level == 0 && index_of_mul.is_none() => { index_of_mul = Some(i) }
+				'/' if level == 0 && index_of_div.is_none() => { index_of_div = Some(i) }
+				'^' if level == 0 && index_of_pow.is_none() => { index_of_pow = Some(i) }
+				_ => {}
+			}
+			if !(level >= 0) { return Err(ExprFromStrErr::BracketClosingBeforeOpeningAt { index: i }) }
+		}
+		return if !(level == 0) { Err(ExprFromStrErr::BadBracketsSequence) }
+		else if let Some(i) = index_of_plus {
+			let l = Self::from_str(&s[..i])?;
+			let r = Self::from_str(&s[i+1..])
+				.map_err(|e| e.shift_index_by(i+1))?;
+			Ok(Sum(bx((l, r))))
+		}
+		else if let Some(i) = index_of_minus {
+			let l = Self::from_str(&s[..i])?;
+			let r = Self::from_str(&s[i+1..])
+				.map_err(|e| e.shift_index_by(i+1))?;
+			Ok(Sum(bx((l, Neg(bx(r))))))
+		}
+		else if let Some(i) = index_of_mul {
+			let l = Self::from_str(&s[..i])?;
+			let r = Self::from_str(&s[i+1..])
+				.map_err(|e| e.shift_index_by(i+1))?;
+			Ok(Prod(bx((l, r))))
+		}
+		else if let Some(i) = index_of_div {
+			let l = Self::from_str(&s[..i])?;
+			let r = Self::from_str(&s[i+1..])
+				.map_err(|e| e.shift_index_by(i+1))?;
+			Ok(Div(bx((l, r))))
+		}
+		else if let Some(i) = index_of_pow {
+			let l = Self::from_str(&s[..i])?;
+			let r = Self::from_str(&s[i+1..])
+				.map_err(|e| e.shift_index_by(i+1))?;
+			Ok(Pow(bx((l, r))))
+		}
+
+		else if s.starts_with("-") {
+			let inner = Self::from_str(&s[1..])
+				.map_err(|e| e.shift_index_by(1))?;
+			Ok(Neg(bx(inner)))
+		}
+		else if s.starts_with("abs") {
+			let inner = Self::from_str(&s[4..s.len()-1])
+				.map_err(|e| e.shift_index_by(4))?;
+			Ok(Abs(bx(inner)))
+		}
+		else if s.starts_with("arg") {
+			let inner = Self::from_str(&s[4..s.len()-1])
+				.map_err(|e| e.shift_index_by(4))?;
+			Ok(Arg(bx(inner)))
+		}
+		else if s.starts_with("re") {
+			let inner = Self::from_str(&s[3..s.len()-1])
+				.map_err(|e| e.shift_index_by(3))?;
+			Ok(Re(bx(inner)))
+		}
+		else if s.starts_with("im") {
+			let inner = Self::from_str(&s[3..s.len()-1])
+				.map_err(|e| e.shift_index_by(3))?;
+			Ok(Im(bx(inner)))
+		}
+		else if s.starts_with("conj") {
+			let inner = Self::from_str(&s[5..s.len()-1])
+				.map_err(|e| e.shift_index_by(5))?;
+			Ok(Conj(bx(inner)))
+		}
+		else if s.starts_with("exp") {
+			let inner = Self::from_str(&s[4..s.len()-1])
+				.map_err(|e| e.shift_index_by(4))?;
+			Ok(Exp(bx(inner)))
+		}
+		else if s.starts_with("ln") {
+			let inner = Self::from_str(&s[3..s.len()-1])
+				.map_err(|e| e.shift_index_by(3))?;
+			Ok(Ln(bx(inner)))
+		}
+		else if s.starts_with("sqrt") {
+			let inner = Self::from_str(&s[5..s.len()-1])
+				.map_err(|e| e.shift_index_by(5))?;
+			Ok(Sqrt(bx(inner)))
+		}
+		else if s.starts_with("sin") {
+			let inner = Self::from_str(&s[4..s.len()-1])
+				.map_err(|e| e.shift_index_by(4))?;
+			Ok(Sin(bx(inner)))
+		}
+		else if s.starts_with("cos") {
+			let inner = Self::from_str(&s[4..s.len()-1])
+				.map_err(|e| e.shift_index_by(4))?;
+			Ok(Cos(bx(inner)))
+		}
+		else if s.starts_with("tan") {
+			let inner = Self::from_str(&s[4..s.len()-1])
+				.map_err(|e| e.shift_index_by(4))?;
+			Ok(Tan(bx(inner)))
+		}
+		else if s.starts_with("sinh") {
+			let inner = Self::from_str(&s[5..s.len()-1])
+				.map_err(|e| e.shift_index_by(5))?;
+			Ok(Sinh(bx(inner)))
+		}
+		else if s.starts_with("cosh") {
+			let inner = Self::from_str(&s[5..s.len()-1])
+				.map_err(|e| e.shift_index_by(5))?;
+			Ok(Cosh(bx(inner)))
+		}
+		else if s.starts_with("tanh") {
+			let inner = Self::from_str(&s[5..s.len()-1])
+				.map_err(|e| e.shift_index_by(5))?;
+			Ok(Tanh(bx(inner)))
+		}
+		else if s.starts_with("asin") {
+			let inner = Self::from_str(&s[5..s.len()-1])
+				.map_err(|e| e.shift_index_by(5))?;
+			Ok(Asin(bx(inner)))
+		}
+		else if s.starts_with("acos") {
+			let inner = Self::from_str(&s[5..s.len()-1])
+				.map_err(|e| e.shift_index_by(5))?;
+			Ok(Acos(bx(inner)))
+		}
+		else if s.starts_with("atan") {
+			let inner = Self::from_str(&s[5..s.len()-1])
+				.map_err(|e| e.shift_index_by(5))?;
+			Ok(Atan(bx(inner)))
+		}
+		else if s.starts_with("asinh") {
+			let inner = Self::from_str(&s[6..s.len()-1])
+				.map_err(|e| e.shift_index_by(6))?;
+			Ok(Asinh(bx(inner)))
+		}
+		else if s.starts_with("acosh") {
+			let inner = Self::from_str(&s[6..s.len()-1])
+				.map_err(|e| e.shift_index_by(6))?;
+			Ok(Acosh(bx(inner)))
+		}
+		else if s.starts_with("atanh") {
+			let inner = Self::from_str(&s[6..s.len()-1])
+				.map_err(|e| e.shift_index_by(6))?;
+			Ok(Atanh(bx(inner)))
+		}
+		else if s.starts_with("round") {
+			let inner = Self::from_str(&s[6..s.len()-1])
+				.map_err(|e| e.shift_index_by(6))?;
+			Ok(Round(bx(inner)))
+		}
+		else if s.starts_with("ceil") {
+			let inner = Self::from_str(&s[5..s.len()-1])
+				.map_err(|e| e.shift_index_by(5))?;
+			Ok(Ceil(bx(inner)))
+		}
+		else if s.starts_with("floor") {
+			let inner = Self::from_str(&s[6..s.len()-1])
+				.map_err(|e| e.shift_index_by(6))?;
+			Ok(Floor(bx(inner)))
+		}
+		else {
+			Err(ExprFromStrErr::BadExpression)
+		}
+	}
+}
+
+
+
 
 
 fn snake_2d_split(n: &BigUint) -> (BigUint, BigUint) {
@@ -911,6 +1166,10 @@ fn snake_2d_split_u64(n: u64) -> (u64, u64) {
 fn snake_2d_unsplit_u64(k: u64, l: u64) -> u64 {
 	*snake_2d_unsplit(&k.into(), &l.into()).to_u64_digits().get(0).unwrap_or(&0)
 }
+
+
+
+
 
 #[cfg(test)]
 mod snake_2d {
@@ -1323,5 +1582,20 @@ mod expr {
 		#[test] fn _158() { assert_eq!(BigUint::from(158_u32), Pow(bx((PrevZ, PrevZ))).to_int()) }
 
 		#[test] fn _19468() { assert_eq!(BigUint::from(19468_u32), Sum(bx((Prod(bx((Z, Z))), InitZ))).to_int()) }
+	}
+
+	mod from_str {
+		use super::*;
+		use Expr::*;
+
+		#[test] fn z() { assert_eq!(Expr::from_str("z"), Ok(Z)) }
+		#[test] fn int_42() { assert_eq!(Expr::from_str("42"), Ok(UInt(42))) }
+		#[test] fn sin_z() { assert_eq!(Expr::from_str("sin(z)"), Ok(Sin(bx(Z)))) }
+		#[test] fn sin_sin_z() { assert_eq!(Expr::from_str("sin(sin(z))"), Ok(Sin(bx(Sin(bx(Z)))))) }
+		#[test] fn sin_cos_z() { assert_eq!(Expr::from_str("sin(cos(z))"), Ok(Sin(bx(Cos(bx(Z)))))) }
+		#[test] fn sum_z_3 () { assert_eq!(Expr::from_str("z+3"), Ok(Sum(bx((Z, UInt(3)))))) }
+		#[test] fn prod_z_3() { assert_eq!(Expr::from_str("z*3"), Ok(Prod(bx((Z, UInt(3)))))) }
+		#[test] fn pow_z_3 () { assert_eq!(Expr::from_str("z^3"), Ok(Pow(bx((Z, UInt(3)))))) }
+		#[test] fn z_sin2z_sq_plus_1() { assert_eq!(Expr::from_str("z*sin(2*z)^2 + 1"), Ok(Sum(bx((Prod(bx((Z, Pow(bx((Sin(bx(Prod(bx((UInt(2), Z))))), UInt(2))))))), UInt(1)))))) }
 	}
 }

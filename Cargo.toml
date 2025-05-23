@@ -1,6 +1,6 @@
 [package]
 name = "fractals"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2024"
 authors = ["dmyTRUEk"]
 homepage   = "https://github.com/dmyTRUEk/fractals"
