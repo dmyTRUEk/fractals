@@ -1,6 +1,6 @@
 [package]
 name = "fractals"
-version = "2.1.2"
+version = "3.0.0"
 edition = "2024"
 authors = ["dmyTRUEk"]
 homepage   = "https://github.com/dmyTRUEk/fractals"
@@ -16,6 +16,8 @@ EQ                		inc/dec render quality
 NP                		next/prev fractal by its Id
 B                 		toggle `break_loop`
 Y                 		toggle `assign_zesc_once`
+-=                		dec/inc `alpha` by `alpha_step`
+90                		dec/inc `alpha_step` 1.1 times
 Space             		toggle some keys repeat mode\
 """
 
