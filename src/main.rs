@@ -1218,25 +1218,30 @@ impl FromStr for Expr {
 
 
 trait RemoveOutermostBrackets {
-	fn remove_outermost_brackets(&self) -> Self;
+	fn remove_outermost_brackets(&self) -> String;
 }
 impl RemoveOutermostBrackets for String {
-	fn remove_outermost_brackets(&self) -> Self {
+	fn remove_outermost_brackets(&self) -> String {
+		let s: &str = self;
+		s.remove_outermost_brackets()
+	}
+}
+impl RemoveOutermostBrackets for &str {
+	fn remove_outermost_brackets(&self) -> String {
 		let mut s: &str = self;
 		while s.starts_with('(') && s.ends_with(')') {
-			let mut is_outer_paired = true;
 			let mut level: i32 = 0;
-			for c in s[..s.len()-1].chars() {
+			let mut levels = vec![level];
+			for c in s[..s.len()].chars() {
 				match c {
 					'(' => { level += 1; }
 					')' => { level -= 1; }
 					_ => {}
 				}
+				levels.push(level);
 				if !(level >= 0) { unreachable!() }
-				if level == 0 {
-					is_outer_paired = false;
-				}
 			}
+			let is_outer_paired = levels[1..levels.len()-1].iter().all(|&l| l > 0);
 			if is_outer_paired {
 				s = &s[1..s.len()-1];
 			} else {
@@ -1815,4 +1820,12 @@ mod expr {
 		#[test] fn ceil_z() { assert_eq!(Expr::from_str("ceil(z)"), Ok(Ceil(bx(Z)))) }
 		#[test] fn floor_z() { assert_eq!(Expr::from_str("floor(z)"), Ok(Floor(bx(Z)))) }
 	}
+}
+
+#[cfg(test)]
+mod remove_outermost_brackets {
+	use super::*;
+	#[test] fn _1() { assert_eq!("(Re(Z)*(Im(Z))^(Alpha))+InitZ", "((Re(Z)*(Im(Z))^(Alpha))+InitZ)".remove_outermost_brackets()) }
+	#[test] fn _2() { assert_eq!("a+b", "(a+b)".remove_outermost_brackets()) }
+	#[test] fn _3() { assert_eq!("(a)+(b)", "(a)+(b)".remove_outermost_brackets()) }
 }
