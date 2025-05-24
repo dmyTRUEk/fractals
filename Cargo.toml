@@ -16,7 +16,8 @@ EQ                		inc/dec render quality
 NP                		next/prev fractal by its Id
 B                 		toggle `break_loop`
 Y                 		toggle `assign_zesc_once`
-Space             		toggle some keys repeat mode"""
+Space             		toggle some keys repeat mode\
+"""
 
 [profile.release]
 opt-level = 3

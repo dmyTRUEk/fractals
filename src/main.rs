@@ -74,7 +74,6 @@ struct Params {
 	assign_zesc_once: bool,
 	break_loop: bool,
 	zesc_value: float,
-	quality: Quality,
 	keys_repeat: bool,
 }
 impl From<CliArgs> for Params {
@@ -118,7 +117,6 @@ impl From<CliArgs> for Params {
 			assign_zesc_once,
 			break_loop,
 			zesc_value,
-			quality: Quality(0),
 			keys_repeat,
 		}
 	}
@@ -127,46 +125,8 @@ impl From<CliArgs> for Params {
 
 
 fn main() {
-	// let fractal_mandelbrot: Expr = {
-	// 	use Expr::*;
-	// 	// Z*Z + InitZ // v1:4768, v2:19468
-	// 	Sum(bx((Prod(bx((Z, Z))), InitZ))) // 19468
-	// };
-	// let fractal_a: Expr = {
-	// 	use Expr::*;
-	// 	// sin(Z)^sin(cosh(Z)) // v1:898512, v2:6599748
-	// 	Pow(bx((Sin(bx(Z)), Sin(bx(Cosh(bx(Z)))))))
-	// };
-	// let fractal_b: Expr = {
-	// 	use Expr::*;
-	// 	// v1:7134919 -> cosh(0e0+0e0i)/cosh(Z/PrevZ)
-	// 	// Div(bx((Cosh(bx(UInt(0_u32.into()))), Cosh(bx(Div(bx((Z, PrevZ)))))))) // v1:6522302
-	// 	Div(bx((UInt(1), Cosh(bx(Div(bx((Z, PrevZ)))))))) // v1:5758027, v2:64474298
-	// };
-	// let fractal_burning_ship: Expr = {
-	// 	use Expr::*;
-	// 	// (|Re(Z)|+i|Im(Z)|)^2 + InitZ
-	// 	Sum(bx((Pow(bx((Sum(bx((Abs(bx(Re(bx(Z)))), Prod(bx((I, Abs(bx(Im(bx(Z)))))))))), UInt(2)))), InitZ))) // v2:40767528629404893533912019020184348823119365583082306616299
-	// 	// Pow(bx((Sum(bx((Abs(bx(Re(bx(Z)))), Prod(bx((I, Abs(bx(Im(bx(Z)))))))))), UInt(2)))) // v2:51285116138904871092239032050
-	// 	// Sum(bx((Abs(bx(Re(bx(Z)))), Prod(bx((I, Abs(bx(Im(bx(Z)))))))))) // v2:57521449653535
-	// 	// Abs(bx(Re(bx(Z)))) // v2:318
-	// 	// Prod(bx((I, Abs(bx(Im(bx(Z))))))) // v2:1926093
-	// 	// I // v2:3
-	// 	// Abs(bx(Im(bx(Z)))) // v2:349
-	// };
-	// let fractal_x: Expr = {
-	// 	use Expr::*;
-	// 	// 3*Z+1
-	// 	Sum(bx((Prod(bx((UInt(3), Z))), UInt(1))))
-	// };
-	// let id = fractal_x.to_int();
-	// println!("id: {id}");
-	// let expr = Expr::from_int(&id);
-	// println!("{} -> {}", id, expr.to_string());
-	// #[allow(unreachable_code)]
-	// return;
-
 	let cli_args = CliArgs::parse();
+	// dbg!(&cli_args);
 
 	if let Some(expr_str) = cli_args.get_id_of {
 		let expr = Expr::from_str(&expr_str).unwrap();
@@ -192,7 +152,7 @@ fn main() {
 			resize: true,
 			// scale_mode: ScaleMode::Stretch,
 			..WindowOptions::default()
-		},
+		}
 	).unwrap();
 
 	window.set_target_fps(60);
@@ -201,6 +161,8 @@ fn main() {
 	let mut zoom : float = 1.0;
 	let mut cam_x: float = 0.0;
 	let mut cam_y: float = 0.0;
+
+	let mut quality = Quality::new();
 
 	// let mut frame_i: u64 = 0;
 	while window.is_open() && !window.is_key_down(Key::Escape) {
@@ -240,14 +202,14 @@ fn main() {
 			println!("keys_repeat: {}", params.keys_repeat);
 		}
 
-		if window.is_key_pressed_or_down(Key::Q, params.keys_repeat) {
-			params.quality.decrease();
-			println!("quality: {:?}", params.quality);
+		if window.is_key_pressed_or_down(Key::E, params.keys_repeat) {
+			quality.increase();
+			println!("quality: {:?}", quality);
 			is_redraw_needed = true;
 		}
-		if window.is_key_pressed_or_down(Key::E, params.keys_repeat) {
-			params.quality.increase();
-			println!("quality: {:?}", params.quality);
+		if window.is_key_pressed_or_down(Key::Q, params.keys_repeat) {
+			quality.decrease();
+			println!("quality: {:?}", quality);
 			is_redraw_needed = true;
 		}
 
@@ -325,7 +287,7 @@ fn main() {
 					let mut z_esc = Complex64::zero();
 					let mut is_bounded = true;
 					let mut escape_iter_n: u32 = 0;
-					let n_iters: u32 = params.quality.zoom_to_iters_n(zoom);
+					let n_iters: u32 = quality.zoom_to_iters_n(zoom);
 					for j in 0..n_iters {
 						if !z.is_nan() {
 							z_last_not_nan = z;
@@ -461,6 +423,10 @@ impl FloatToColor {
 #[derive(Debug)]
 struct Quality(i32);
 impl Quality {
+	fn new() -> Self {
+		Self(0)
+	}
+
 	fn zoom_to_iters_n(&self, zoom: float) -> u32 {
 		let quality = self.0 as float;
 		let log_base: float = 1. + (-quality / 5.).exp();
@@ -786,18 +752,19 @@ impl Expr {
 		use Expr::*;
 		match self {
 			// 0 order
-			Z => return 0_u32.into(),
+			Z     => return 0_u32.into(),
 			PrevZ => return 1_u32.into(),
 			InitZ => return 2_u32.into(),
-			I => return 3_u32.into(),
+			I     => return 3_u32.into(),
 			_ => {}
 		}
 		BigUint::from(Self::NUMBER_OF_FINITE_VARIANTS) + match self {
 			// 0 order
-			Z     => unreachable!(),
-			PrevZ => unreachable!(),
-			InitZ => unreachable!(),
-			I     => unreachable!(),
+			Z
+			| PrevZ
+			| InitZ
+			| I
+			=> unreachable!(),
 			UInt(n)    => BigUint::from(00_u32) + n * Self::NUMBER_OF_INFINITE_VARIANTS,
 			Float(x)   => BigUint::from(01_u32) + x.to_bits() * Self::NUMBER_OF_INFINITE_VARIANTS,
 			Complex(c) => {
@@ -921,6 +888,7 @@ impl FromStr for Expr {
 		use Expr::*;
 		// dbg!(s);
 		let s: &str = &s.trim().to_lowercase();
+		// dbg!(s);
 		if s.starts_with('(') && s.ends_with(')') {
 			return Self::from_str(&s[1..s.len()-1])
 		}
@@ -964,8 +932,10 @@ impl FromStr for Expr {
 				'^' if level == 0 && index_of_pow.is_none() => { index_of_pow = Some(i) }
 				_ => {}
 			}
+			// dbg!(level);
 			if !(level >= 0) { return Err(ExprFromStrErr::BracketClosingBeforeOpeningAt { index: i }) }
 		}
+		// dbg!(level);
 		return if !(level == 0) { Err(ExprFromStrErr::BadBracketsSequence) }
 		else if let Some(i) = index_of_plus {
 			let l = Self::from_str(&s[..i])?;
