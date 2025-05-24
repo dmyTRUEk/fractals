@@ -958,7 +958,7 @@ impl FromStr for Expr {
 					level -= 1;
 				}
 				'+' if level == 0 && index_of_plus.is_none() => { index_of_plus = Some(i) }
-				'-' if level == 0 && index_of_minus.is_none() => { index_of_minus = Some(i) }
+				'-' if level == 0 && index_of_minus.is_none() && i > 0 => { index_of_minus = Some(i) }
 				'*' if level == 0 && index_of_mul.is_none() => { index_of_mul = Some(i) }
 				'/' if level == 0 && index_of_div.is_none() => { index_of_div = Some(i) }
 				'^' if level == 0 && index_of_pow.is_none() => { index_of_pow = Some(i) }
@@ -1043,21 +1043,6 @@ impl FromStr for Expr {
 				.map_err(|e| e.shift_index_by(5))?;
 			Ok(Sqrt(bx(inner)))
 		}
-		else if s.starts_with("sin") {
-			let inner = Self::from_str(&s[4..s.len()-1])
-				.map_err(|e| e.shift_index_by(4))?;
-			Ok(Sin(bx(inner)))
-		}
-		else if s.starts_with("cos") {
-			let inner = Self::from_str(&s[4..s.len()-1])
-				.map_err(|e| e.shift_index_by(4))?;
-			Ok(Cos(bx(inner)))
-		}
-		else if s.starts_with("tan") {
-			let inner = Self::from_str(&s[4..s.len()-1])
-				.map_err(|e| e.shift_index_by(4))?;
-			Ok(Tan(bx(inner)))
-		}
 		else if s.starts_with("sinh") {
 			let inner = Self::from_str(&s[5..s.len()-1])
 				.map_err(|e| e.shift_index_by(5))?;
@@ -1073,20 +1058,20 @@ impl FromStr for Expr {
 				.map_err(|e| e.shift_index_by(5))?;
 			Ok(Tanh(bx(inner)))
 		}
-		else if s.starts_with("asin") {
-			let inner = Self::from_str(&s[5..s.len()-1])
-				.map_err(|e| e.shift_index_by(5))?;
-			Ok(Asin(bx(inner)))
+		else if s.starts_with("sin") {
+			let inner = Self::from_str(&s[4..s.len()-1])
+				.map_err(|e| e.shift_index_by(4))?;
+			Ok(Sin(bx(inner)))
 		}
-		else if s.starts_with("acos") {
-			let inner = Self::from_str(&s[5..s.len()-1])
-				.map_err(|e| e.shift_index_by(5))?;
-			Ok(Acos(bx(inner)))
+		else if s.starts_with("cos") {
+			let inner = Self::from_str(&s[4..s.len()-1])
+				.map_err(|e| e.shift_index_by(4))?;
+			Ok(Cos(bx(inner)))
 		}
-		else if s.starts_with("atan") {
-			let inner = Self::from_str(&s[5..s.len()-1])
-				.map_err(|e| e.shift_index_by(5))?;
-			Ok(Atan(bx(inner)))
+		else if s.starts_with("tan") {
+			let inner = Self::from_str(&s[4..s.len()-1])
+				.map_err(|e| e.shift_index_by(4))?;
+			Ok(Tan(bx(inner)))
 		}
 		else if s.starts_with("asinh") {
 			let inner = Self::from_str(&s[6..s.len()-1])
@@ -1102,6 +1087,21 @@ impl FromStr for Expr {
 			let inner = Self::from_str(&s[6..s.len()-1])
 				.map_err(|e| e.shift_index_by(6))?;
 			Ok(Atanh(bx(inner)))
+		}
+		else if s.starts_with("asin") {
+			let inner = Self::from_str(&s[5..s.len()-1])
+				.map_err(|e| e.shift_index_by(5))?;
+			Ok(Asin(bx(inner)))
+		}
+		else if s.starts_with("acos") {
+			let inner = Self::from_str(&s[5..s.len()-1])
+				.map_err(|e| e.shift_index_by(5))?;
+			Ok(Acos(bx(inner)))
+		}
+		else if s.starts_with("atan") {
+			let inner = Self::from_str(&s[5..s.len()-1])
+				.map_err(|e| e.shift_index_by(5))?;
+			Ok(Atan(bx(inner)))
 		}
 		else if s.starts_with("round") {
 			let inner = Self::from_str(&s[6..s.len()-1])
@@ -1591,12 +1591,40 @@ mod expr {
 
 		#[test] fn z() { assert_eq!(Expr::from_str("z"), Ok(Z)) }
 		#[test] fn int_42() { assert_eq!(Expr::from_str("42"), Ok(UInt(42))) }
-		#[test] fn sin_z() { assert_eq!(Expr::from_str("sin(z)"), Ok(Sin(bx(Z)))) }
 		#[test] fn sin_sin_z() { assert_eq!(Expr::from_str("sin(sin(z))"), Ok(Sin(bx(Sin(bx(Z)))))) }
 		#[test] fn sin_cos_z() { assert_eq!(Expr::from_str("sin(cos(z))"), Ok(Sin(bx(Cos(bx(Z)))))) }
+		#[test] fn Sin_Cos_z() { assert_eq!(Expr::from_str("Sin(Cos(z))"), Ok(Sin(bx(Cos(bx(Z)))))) }
 		#[test] fn sum_z_3 () { assert_eq!(Expr::from_str("z+3"), Ok(Sum(bx((Z, UInt(3)))))) }
 		#[test] fn prod_z_3() { assert_eq!(Expr::from_str("z*3"), Ok(Prod(bx((Z, UInt(3)))))) }
 		#[test] fn pow_z_3 () { assert_eq!(Expr::from_str("z^3"), Ok(Pow(bx((Z, UInt(3)))))) }
 		#[test] fn z_sin2z_sq_plus_1() { assert_eq!(Expr::from_str("z*sin(2*z)^2 + 1"), Ok(Sum(bx((Prod(bx((Z, Pow(bx((Sin(bx(Prod(bx((UInt(2), Z))))), UInt(2))))))), UInt(1)))))) }
+
+		#[test] fn neg_z() { assert_eq!(Expr::from_str("-z"), Ok(Neg(bx(Z)))) }
+		#[test] fn abs_z() { assert_eq!(Expr::from_str("abs(z)"), Ok(Abs(bx(Z)))) }
+		#[test] fn arg_z() { assert_eq!(Expr::from_str("arg(z)"), Ok(Arg(bx(Z)))) }
+		#[test] fn re_z() { assert_eq!(Expr::from_str("re(z)"), Ok(Re(bx(Z)))) }
+		#[test] fn im_z() { assert_eq!(Expr::from_str("im(z)"), Ok(Im(bx(Z)))) }
+		#[test] fn conj_z() { assert_eq!(Expr::from_str("conj(z)"), Ok(Conj(bx(Z)))) }
+		#[test] fn exp_z() { assert_eq!(Expr::from_str("exp(z)"), Ok(Exp(bx(Z)))) }
+		#[test] fn ln_z() { assert_eq!(Expr::from_str("ln(z)"), Ok(Ln(bx(Z)))) }
+		#[test] fn sqrt_z() { assert_eq!(Expr::from_str("sqrt(z)"), Ok(Sqrt(bx(Z)))) }
+
+		#[test] fn sin_z() { assert_eq!(Expr::from_str("sin(z)"), Ok(Sin(bx(Z)))) }
+		#[test] fn cos_z() { assert_eq!(Expr::from_str("cos(z)"), Ok(Cos(bx(Z)))) }
+		#[test] fn tan_z() { assert_eq!(Expr::from_str("tan(z)"), Ok(Tan(bx(Z)))) }
+		#[test] fn asin_z() { assert_eq!(Expr::from_str("asin(z)"), Ok(Asin(bx(Z)))) }
+		#[test] fn acos_z() { assert_eq!(Expr::from_str("acos(z)"), Ok(Acos(bx(Z)))) }
+		#[test] fn atan_z() { assert_eq!(Expr::from_str("atan(z)"), Ok(Atan(bx(Z)))) }
+
+		#[test] fn sinh_z() { assert_eq!(Expr::from_str("sinh(z)"), Ok(Sinh(bx(Z)))) }
+		#[test] fn cosh_z() { assert_eq!(Expr::from_str("cosh(z)"), Ok(Cosh(bx(Z)))) }
+		#[test] fn tanh_z() { assert_eq!(Expr::from_str("tanh(z)"), Ok(Tanh(bx(Z)))) }
+		#[test] fn asinh_z() { assert_eq!(Expr::from_str("asinh(z)"), Ok(Asinh(bx(Z)))) }
+		#[test] fn acosh_z() { assert_eq!(Expr::from_str("acosh(z)"), Ok(Acosh(bx(Z)))) }
+		#[test] fn atanh_z() { assert_eq!(Expr::from_str("atanh(z)"), Ok(Atanh(bx(Z)))) }
+
+		#[test] fn round_z() { assert_eq!(Expr::from_str("round(z)"), Ok(Round(bx(Z)))) }
+		#[test] fn ceil_z() { assert_eq!(Expr::from_str("ceil(z)"), Ok(Ceil(bx(Z)))) }
+		#[test] fn floor_z() { assert_eq!(Expr::from_str("floor(z)"), Ok(Floor(bx(Z)))) }
 	}
 }
