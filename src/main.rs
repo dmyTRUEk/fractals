@@ -10,13 +10,14 @@
 	unsafe_code,
 )]
 
-use std::str::FromStr;
+use std::{num::NonZeroU64, str::FromStr, time::Instant};
 
 use clap::{Parser, arg};
-use minifb::{Key, KeyRepeat, Window, WindowOptions};
+use minifb::{Key, Window, WindowOptions};
 use num::{complex::{Complex64, ComplexFloat}, BigUint, Zero};
 use rand::{rng, Rng};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use wgpu::util::DeviceExt;
 
 mod utils_io;
 
@@ -86,6 +87,14 @@ struct CliArgs {
 	#[arg(short='l', long, default_value=None)]
 	alpha_step: Option<float>,
 
+	// TODO
+	#[arg(short='g', long, default_value_t=false)]
+	dont_use_gpu: bool,
+
+	// TODO
+	#[arg(short='v', long, default_value_t=false)]
+	verbose: bool,
+
 	// TODO: render fractal to imgs/vid
 }
 
@@ -99,6 +108,8 @@ struct Params {
 	allow_no_alpha: bool,
 	clamp_alpha: bool,
 	alpha_step: float,
+	use_gpu: bool,
+	verbose: bool,
 }
 impl From<CliArgs> for Params {
 	fn from(CliArgs {
@@ -112,11 +123,13 @@ impl From<CliArgs> for Params {
 		allow_no_alpha,
 		clamp_alpha,
 		alpha_step,
+		dont_use_gpu,
+		verbose,
 	}: CliArgs) -> Self {
 		Self {
 			fractal: {
 				if let Some(fractal) = fractal {
-					// TODO: base36
+					// TODO: base36?
 					if let Ok(id) = BigUint::from_str(&fractal) {
 						let expr = Expr::from_int(&id);
 						(id, expr)
@@ -150,6 +163,8 @@ impl From<CliArgs> for Params {
 			allow_no_alpha,
 			clamp_alpha,
 			alpha_step: alpha_step.unwrap_or(ALPHA_STEP_DEFAULT),
+			use_gpu: !dont_use_gpu,
+			verbose,
 		}
 	}
 }
@@ -173,6 +188,14 @@ fn main() {
 	let mut params: Params = cli_args.into();
 	println!("{} -> {}", params.fractal.0, params.fractal.1.to_string());
 
+
+	let mut device_queue: Option<(wgpu::Device, wgpu::Queue)> = params.use_gpu.then(init_device_and_queue);
+
+	// let shader_code = std::fs::read_to_string("src/compute_shader.wgsl").unwrap();
+	let shader_code = include_str!("compute_shader.wgsl");
+	let (shader_code_l, shader_code_r) = shader_code.split_once("REPLACEME").unwrap();
+
+
 	let (mut w, mut h) = (320, 240);
 	let (mut wf, mut hf) = (w as float, h as float);
 	let mut buffer: Vec<u32> = vec![0; w * h];
@@ -190,24 +213,24 @@ fn main() {
 	window.set_target_fps(60);
 	window.update_with_buffer(&buffer, w, h).unwrap();
 
-	let mut zoom : float = 1.0;
-	let mut cam_x: float = 0.0;
-	let mut cam_y: float = 0.0;
+	let mut zoom : float = 1.;
+	let mut cam_x: float = 0.;
+	let mut cam_y: float = 0.;
 
 	let mut quality = Quality::new();
 
 	let mut alpha: float = 0.5;
 
-	// let mut frame_i: u64 = 0;
+	let mut frame_i: u64 = 0;
 	while window.is_open() && !window.is_key_down(Key::Escape) {
-		let mut is_redraw_needed: bool = false;
+		let mut is_redraw_needed: bool = if frame_i > 0 { false } else { true /* render first actual frame */ };
 
 		(w, h) = window.get_size();
 		(wf, hf) = (w as float, h as float);
 		let new_size = w * h;
 		if new_size != buffer.len() {
 			buffer.resize(new_size, 0);
-			// println!("Resized to {w}x{h}");
+			if params.verbose { println!("Resized to {w}x{h}") }
 			is_redraw_needed = true;
 		}
 		// let ratio_hw = hf / wf;
@@ -231,7 +254,7 @@ fn main() {
 			is_redraw_needed = true;
 		}
 
-		if window.is_key_pressed(Key::Space, KeyRepeat::No) {
+		if window.is_key_pressed_(Key::Space) {
 			params.keys_repeat = !params.keys_repeat;
 			println!("keys_repeat: {}", params.keys_repeat);
 		}
@@ -305,17 +328,27 @@ fn main() {
 			println!("alpha_step: {}", params.alpha_step);
 		}
 
+		if window.is_key_pressed_(Key::G) {
+			params.use_gpu = !params.use_gpu;
+			println!("use_gpu: {}", params.use_gpu);
+			is_redraw_needed = true;
+		}
+		if window.is_key_pressed_(Key::V) {
+			params.verbose = !params.verbose;
+			println!("verbose: {}", params.verbose);
+		}
+
 		if window.is_key_pressed_or_down(Key::R, params.keys_repeat) {
-			zoom  = 1.0;
-			cam_x = 0.0;
-			cam_y = 0.0;
+			zoom  = 1.;
+			cam_x = 0.;
+			cam_y = 0.;
 			println!("zoom reset");
 			is_redraw_needed = true;
 		}
 
 		// Compute center world coords BEFORE zoom
-		let scx = w as float / 2.0; // screen center x
-		let scy = h as float / 2.0; // screen center x
+		let scx = wf / 2.; // screen center x
+		let scy = hf / 2.; // screen center x
 		let center_world_before = screen_to_world(STW{x:scx, y:scy, wf, hf, zoom, cam_x, cam_y});
 
 		if window.is_key_down(Key::Z) || window.is_key_down(Key::I) {
@@ -328,65 +361,325 @@ fn main() {
 		}
 
 		if is_redraw_needed {
-			// println!("\nframe {frame_i}:"); frame_i += 1;
+			frame_i += 1;
+			if params.verbose { println!("\nframe {frame_i}:") }
 
-			// println!("cam xy: {cam_x}, {cam_y}");
-			// println!("zoom = {zoom}  ->  n_iters = {}", zoom_to_iters_n(zoom));
+			if params.verbose {
+				println!("cam xy: {cam_x}, {cam_y}");
+				println!("zoom = {zoom:.3e}  ->  n_iters = {}", quality.zoom_to_iters_n(zoom));
+			}
 			// Compute center world coords AFTER zoom
 			let center_world_after = screen_to_world(STW{x:scx, y:scy, wf, hf, zoom, cam_x, cam_y});
 			// Adjust camera so center remains fixed
 			cam_x += center_world_before.0 - center_world_after.0;
 			cam_y += center_world_before.1 - center_world_after.1;
 
-			buffer
-				// .iter_mut()
-				.par_iter_mut()
-				.enumerate()
-				.for_each(|(i, pixel)| {
-					let x = (i % w) as float;
-					let y = (i / w) as float;
-					let (x, y) = screen_to_world(STW{x, y, wf, hf, zoom, cam_x, cam_y});
-					let z_init = Complex64::new(x, y);
-					let mut z = z_init;
-					let mut z_prev = z_init;
-					let mut z_last_not_nan = z;
-					let mut z_esc = Complex64::zero();
-					let mut is_bounded = true;
-					let mut escape_iter_n: u32 = 0;
-					let n_iters: u32 = quality.zoom_to_iters_n(zoom);
-					for j in 0..n_iters {
-						if !z.is_nan() {
-							z_last_not_nan = z;
-						}
-						let z_new = params.fractal.1.eval(z, z_prev, z_init, alpha);
-						z_prev = z;
-						z = z_new;
-						let z_check = z.norm() > params.zesc_value || z.is_nan();
-						let is_bounded_check = if params.assign_zesc_once { is_bounded } else { true };
-						if z_check && is_bounded_check {
-							is_bounded = false;
-							escape_iter_n = j;
-							z_esc = z;
-							if params.break_loop {
-								break;
+			let time_begin = Instant::now();
+			if !params.use_gpu {
+				buffer
+					// .iter_mut()
+					.par_iter_mut()
+					.enumerate()
+					.for_each(|(i, pixel)| {
+						let x = (i % w) as float;
+						let y = (i / w) as float;
+						let (x, y) = screen_to_world(STW{x, y, wf, hf, zoom, cam_x, cam_y});
+						let z_init = Complex64::new(x, y);
+						let mut z = z_init;
+						let mut z_prev = z_init;
+						let mut z_last_not_nan = z;
+						let mut z_esc = Complex64::zero();
+						let mut is_bounded = true;
+						let mut escape_iter_n: u32 = 0;
+						let n_iters: u32 = quality.zoom_to_iters_n(zoom);
+						for j in 0..n_iters {
+							if !z.is_nan() {
+								z_last_not_nan = z;
+							}
+							let z_new = params.fractal.1.eval(z, z_prev, z_init, alpha);
+							z_prev = z;
+							z = z_new;
+							let z_check = z.norm() > params.zesc_value || z.is_nan();
+							let is_bounded_check = if params.assign_zesc_once { is_bounded } else { true };
+							if z_check && is_bounded_check {
+								is_bounded = false;
+								escape_iter_n = j;
+								z_esc = z;
+								if params.break_loop {
+									break;
+								}
 							}
 						}
-					}
-					let color = if is_bounded { BLACK } else {
-						// let t = (escape_iter_n as float) + 1. - z.abs().ln().ln() / (2.).ln();
-						// let t = ((escape_iter_n + 1) as float) - z.abs().ln().log2();
-						// println!("\nz_esc={z_esc}, escape_iter_n={escape_iter_n}, z={z}");
-						assert!(!z_last_not_nan.is_nan(), "{z_last_not_nan}");
-						let t = if !z_esc.is_nan() { z_esc } else { z_last_not_nan }.abs();
-						FloatToColor::Rainbow.eval(t)
-					};
-					*pixel = color.value();
+						let color = if is_bounded { BLACK } else {
+							// let t = (escape_iter_n as float) + 1. - z.abs().ln().ln() / (2.).ln();
+							// let t = ((escape_iter_n + 1) as float) - z.abs().ln().log2();
+							// println!("\nz_esc={z_esc}, escape_iter_n={escape_iter_n}, z={z}");
+							assert!(!z_last_not_nan.is_nan(), "{z_last_not_nan}");
+							let t = if !z_esc.is_nan() { z_esc } else { z_last_not_nan }.abs();
+							FloatToColor::Rainbow.eval(t)
+						};
+						*pixel = color.value();
+					});
+			}
+			else { // use GPU:
+				let (device, queue) = device_queue.get_or_insert_with(init_device_and_queue);
+
+				// let time_begin_gpu_calc = Instant::now();
+
+				let n_iters: u32 = quality.zoom_to_iters_n(zoom);
+				let arguments: Vec<f32> = vec![
+					cam_x as f32,
+					cam_y as f32,
+					zoom as f32,
+					n_iters as f32,
+					if params.break_loop { 1. } else { 0. },
+					if params.assign_zesc_once { 1. } else { 0. },
+					params.zesc_value as f32,
+					alpha as f32,
+				];
+
+				let shader_code = [shader_code_l, &params.fractal.1.to_wgsl(), shader_code_r].concat();
+				let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+					label: Some("my_compute_shader"),
+					source: wgpu::ShaderSource::Wgsl(shader_code.into()),
 				});
+
+				// Create a buffer with the data we want to process on the GPU.
+				//
+				// `create_buffer_init` is a utility provided by `wgpu::util::DeviceExt` which simplifies creating
+				// a buffer with some initial data.
+				//
+				// We use the `bytemuck` crate to cast the slice of f32 to a &[u8] to be uploaded to the GPU.
+				let input_data_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+					label: None,
+					contents: bytemuck::cast_slice(&arguments),
+					usage: wgpu::BufferUsages::STORAGE,
+				});
+
+				// Now we create a buffer to store the output data.
+				let output_data_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+					label: None,
+					size: (w as u64) * (h as u64) * (std::mem::size_of::<u32>() as u64),
+					usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+					mapped_at_creation: false,
+				});
+
+				// Finally we create a buffer which can be read by the CPU. This buffer is how we will read
+				// the data. We need to use a separate buffer because we need to have a usage of `MAP_READ`,
+				// and that usage can only be used with `COPY_DST`.
+				let download_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+					label: None,
+					size: output_data_buffer.size(),
+					usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+					mapped_at_creation: false,
+				});
+
+				// A bind group layout describes the types of resources that a bind group can contain. Think
+				// of this like a C-style header declaration, ensuring both the pipeline and bind group agree
+				// on the types of resources.
+				let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+					label: None,
+					entries: &[
+						// Input buffer
+						wgpu::BindGroupLayoutEntry {
+							binding: 0,
+							visibility: wgpu::ShaderStages::COMPUTE,
+							ty: wgpu::BindingType::Buffer {
+								ty: wgpu::BufferBindingType::Storage { read_only: true },
+								// This is the size of a single element in the buffer.
+								min_binding_size: Some(NonZeroU64::new(4).unwrap()),
+								has_dynamic_offset: false,
+							},
+							count: None,
+						},
+						// Output buffer
+						wgpu::BindGroupLayoutEntry {
+							binding: 1,
+							visibility: wgpu::ShaderStages::COMPUTE,
+							ty: wgpu::BindingType::Buffer {
+								ty: wgpu::BufferBindingType::Storage { read_only: false },
+								// This is the size of a single element in the buffer.
+								min_binding_size: Some(NonZeroU64::new(4).unwrap()),
+								has_dynamic_offset: false,
+							},
+							count: None,
+						},
+					],
+				});
+
+				// The bind group contains the actual resources to bind to the pipeline.
+				//
+				// Even when the buffers are individually dropped, wgpu will keep the bind group and buffers
+				// alive until the bind group itself is dropped.
+				let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+					label: None,
+					layout: &bind_group_layout,
+					entries: &[
+						wgpu::BindGroupEntry {
+							binding: 0,
+							resource: input_data_buffer.as_entire_binding(),
+						},
+						wgpu::BindGroupEntry {
+							binding: 1,
+							resource: output_data_buffer.as_entire_binding(),
+						},
+					],
+				});
+
+				// The pipeline layout describes the bind groups that a pipeline expects
+				let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+					label: None,
+					bind_group_layouts: &[&bind_group_layout],
+					push_constant_ranges: &[],
+				});
+
+				// The pipeline is the ready-to-go program state for the GPU. It contains the shader modules,
+				// the interfaces (bind group layouts) and the shader entry point.
+				let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+					label: None,
+					layout: Some(&pipeline_layout),
+					module: &module,
+					entry_point: Some("my_compute_shader"),
+					compilation_options: wgpu::PipelineCompilationOptions::default(),
+					cache: None,
+				});
+
+				// The command encoder allows us to record commands that we will later submit to the GPU.
+				let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+				// A compute pass is a single series of compute operations. While we are recording a compute
+				// pass, we cannot record to the encoder.
+				let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+					label: None,
+					timestamp_writes: None,
+				});
+
+				// Set the pipeline that we want to use
+				compute_pass.set_pipeline(&pipeline);
+				// Set the bind group that we want to use
+				compute_pass.set_bind_group(0, &bind_group, &[]);
+
+				// Now we dispatch a series of workgroups. Each workgroup is a 3D grid of individual programs.
+				//
+				// We defined the workgroup size in the shader as 64x1x1. So in order to process all of our
+				// inputs, we ceiling divide the number of inputs by 64. If the user passes 32 inputs, we will
+				// dispatch 1 workgroups. If the user passes 65 inputs, we will dispatch 2 workgroups, etc.
+				// let workgroup_count = arguments.len().div_ceil(64);
+				compute_pass.dispatch_workgroups(w as u32, h as u32, 1);
+
+				// Now we drop the compute pass, giving us access to the encoder again.
+				drop(compute_pass);
+
+				// We add a copy operation to the encoder. This will copy the data from the output buffer on the
+				// GPU to the download buffer on the CPU.
+				encoder.copy_buffer_to_buffer(
+					&output_data_buffer,
+					0,
+					&download_buffer,
+					0,
+					output_data_buffer.size(),
+				);
+
+				// We finish the encoder, giving us a fully recorded command buffer.
+				let command_buffer = encoder.finish();
+
+				// At this point nothing has actually been executed on the gpu. We have recorded a series of
+				// commands that we want to execute, but they haven't been sent to the gpu yet.
+				//
+				// Submitting to the queue sends the command buffer to the gpu. The gpu will then execute the
+				// commands in the command buffer in order.
+				queue.submit([command_buffer]);
+
+				// We now map the download buffer so we can read it. Mapping tells wgpu that we want to read/write
+				// to the buffer directly by the CPU and it should not permit any more GPU operations on the buffer.
+				//
+				// Mapping requires that the GPU be finished using the buffer before it resolves, so mapping has a callback
+				// to tell you when the mapping is complete.
+				let buffer_slice = download_buffer.slice(..);
+				buffer_slice.map_async(wgpu::MapMode::Read, |_| {
+					// In this case we know exactly when the mapping will be finished,
+					// so we don't need to do anything in the callback.
+				});
+
+				// Wait for the GPU to finish working on the submitted work. This doesn't work on WebGPU, so we would need
+				// to rely on the callback to know when the buffer is mapped.
+				device.poll(wgpu::PollType::Wait).unwrap();
+
+				// println!("GPU CALC DONE in {:.4} seconds", time_begin_gpu_calc.elapsed().as_secs_f64());
+				// let time_begin_gpu_load = Instant::now();
+
+				// We can now read the data from the buffer.
+				let data = buffer_slice.get_mapped_range();
+				// Convert the data back to a slice of f32.
+				let result: &[u32] = bytemuck::cast_slice(&data);
+				assert_eq!(w*h, result.len());
+
+				// Print out the result.
+				// println!("Result: {:?}", result);
+				// println!("LOAD FROM GPU DONE in {:.4} seconds", time_begin_gpu_load.elapsed().as_secs_f64());
+				// let time_begin_cpu = Instant::now();
+
+				buffer = result.into();
+			}
+			if params.verbose {
+				let frametime = time_begin.elapsed().as_secs_f64();
+				let fps = 1. / frametime;
+				println!("FRAME DONE in {frametime:.4} seconds => {fps:.2} FPS\n");
+			}
 		}
 
 		window.update_with_buffer(&buffer, w, h).unwrap();
 	}
 }
+
+
+
+fn init_device_and_queue() -> (wgpu::Device, wgpu::Queue) {
+	// We first initialize an wgpu `Instance`, which contains any "global" state wgpu needs.
+	//
+	// This is what loads the vulkan/dx12/metal/opengl libraries.
+	let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+
+	// We then create an `Adapter` which represents a physical gpu in the system. It allows
+	// us to query information about it and create a `Device` from it.
+	//
+	// This function is asynchronous in WebGPU, so request_adapter returns a future. On native/webgl
+	// the future resolves immediately, so we can block on it without harm.
+	let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).expect("Failed to create adapter");
+
+	// Print out some basic information about the adapter.
+	println!("\nRunning on Adapter: {:#?}", adapter.get_info());
+
+	// Check to see if the adapter supports compute shaders. While WebGPU guarantees support for
+	// compute shaders, wgpu supports a wider range of devices through the use of "downlevel" devices.
+	let downlevel_capabilities = adapter.get_downlevel_capabilities();
+	if !downlevel_capabilities.flags.contains(wgpu::DownlevelFlags::COMPUTE_SHADERS) {
+		panic!("Adapter does not support compute shaders");
+	}
+
+	// We then create a `Device` and a `Queue` from the `Adapter`.
+	//
+	// The `Device` is used to create and manage GPU resources.
+	// The `Queue` is a queue used to submit work for the GPU to process.
+	let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+		label: None,
+		required_features: wgpu::Features::empty(),
+		required_limits: wgpu::Limits::downlevel_defaults(),
+		memory_hints: wgpu::MemoryHints::MemoryUsage,
+		trace: wgpu::Trace::Off,
+	})).expect("Failed to create device");
+
+	// Create a shader module from our shader code. This will parse and validate the shader.
+	//
+	// `include_wgsl` is a macro provided by wgpu like `include_str` which constructs a ShaderModuleDescriptor.
+	// If you want to load shaders differently, you can construct the ShaderModuleDescriptor manually.
+	// let shader_module_descriptor = wgpu::include_wgsl!("shader.wgsl");
+	// dbg!(&shader_module_descriptor);
+	// let shader_code = read_file_to_string("src/shader.wgsl").unwrap();
+
+	(device, queue)
+}
+
 
 
 #[allow(non_camel_case_types)]
@@ -538,8 +831,17 @@ impl WindowExtIsKeyPressedOrDown for Window {
 		if repeat {
 			self.is_key_down(key)
 		} else {
-			self.is_key_pressed(key, KeyRepeat::No)
+			self.is_key_pressed_(key)
 		}
+	}
+}
+
+trait WindowExtIsKeyPressed_ {
+	fn is_key_pressed_(&self, key: Key) -> bool;
+}
+impl WindowExtIsKeyPressed_ for Window {
+	fn is_key_pressed_(&self, key: Key) -> bool {
+		self.is_key_pressed(key, minifb::KeyRepeat::No)
 	}
 }
 
@@ -641,8 +943,8 @@ impl Expr {
 			Ceil(e)  => { let Complex64 { re, im } = e.eval(z, prev_z, init_z, alpha); cf(re.ceil(), im.ceil()) },
 			Floor(e) => { let Complex64 { re, im } = e.eval(z, prev_z, init_z, alpha); cf(re.floor(), im.floor()) },
 			// 2 order
-			Sum(box(l, r))       => l.eval(z, prev_z, init_z, alpha) + r.eval(z, prev_z, init_z, alpha), // es.into_iter().map(|e| e.eval(z, prev_z, init_z)).sum(),
-			Prod(box(l, r))      => l.eval(z, prev_z, init_z, alpha) * r.eval(z, prev_z, init_z, alpha), // es.into_iter().map(|e| e.eval(z, prev_z, init_z)).product(),
+			Sum(box(l, r))       => l.eval(z, prev_z, init_z, alpha) + r.eval(z, prev_z, init_z, alpha),
+			Prod(box(l, r))      => l.eval(z, prev_z, init_z, alpha) * r.eval(z, prev_z, init_z, alpha),
 			Div(box(num, denom)) => num.eval(z, prev_z, init_z, alpha) / denom.eval(z, prev_z, init_z, alpha),
 			Pow(box(b, t))       => b.eval(z, prev_z, init_z, alpha).powc(t.eval(z, prev_z, init_z, alpha)),
 			// _ => todo!()
@@ -966,10 +1268,56 @@ impl Expr {
 			Ceil(e)  => format!("Ceil({})", e.to_string()),
 			Floor(e) => format!("Floor({})", e.to_string()),
 			// 2 order
-			Sum(box(l, r))       => format!("({}+{})", l.to_string(), r.to_string()), // es.into_iter().map(|e| e.to_string()).intersperse(format!("+")).collect(),
-			Prod(box(l, r))      => format!("({}*{})", l.to_string(), r.to_string()), // es.into_iter().map(|e| e.to_string()).intersperse(format!("*")).collect(),
+			Sum(box(l, r))       => format!("({}+{})", l.to_string(), r.to_string()),
+			Prod(box(l, r))      => format!("({}*{})", l.to_string(), r.to_string()),
 			Div(box(num, denom)) => format!("({})/({})", num.to_string(), denom.to_string()),
 			Pow(box(b, t))       => format!("({})^({})", b.to_string(), t.to_string()),
+			// _ => todo!()
+		}
+	}
+
+	fn to_wgsl(&self) -> String {
+		use Expr::*;
+		match self {
+			// 0 order
+			Z     => format!("z"),
+			PrevZ => format!("z_prev"),
+			InitZ => format!("z_init"),
+			I     => format!("I"),
+			Alpha => format!("Cre(alpha)"),
+			UInt(n)    => format!("Cre({n}.0)"),
+			Float(x)   => format!("Cre({x})"),
+			Complex(z) => format!("C({re},{im})", re=z.re, im=z.im),
+			// 1 order
+			Neg(e)   => format!("cneg({})", e.to_wgsl()),
+			Abs(e)   => format!("cnormc({})", e.to_wgsl()),
+			Arg(e)   => format!("cargc({})", e.to_wgsl()),
+			Re(e)    => format!("crec({})", e.to_wgsl()),
+			Im(e)    => format!("cimc({})", e.to_wgsl()),
+			Conj(e)  => format!("cconj({})", e.to_wgsl()),
+			Exp(e)   => format!("cexp({})", e.to_wgsl()),
+			Ln(e)    => format!("cln({})", e.to_wgsl()),
+			Sqrt(e)  => format!("csqrt({})", e.to_wgsl()),
+			Sin(e)   => format!("csin({})", e.to_wgsl()),
+			Cos(e)   => format!("ccos({})", e.to_wgsl()),
+			Tan(e)   => format!("ctan({})", e.to_wgsl()),
+			Sinh(e)  => format!("csinh({})", e.to_wgsl()),
+			Cosh(e)  => format!("ccosh({})", e.to_wgsl()),
+			Tanh(e)  => format!("ctanh({})", e.to_wgsl()),
+			Asin(e)  => format!("casin({})", e.to_wgsl()),
+			Acos(e)  => format!("cacos({})", e.to_wgsl()),
+			Atan(e)  => format!("catan({})", e.to_wgsl()),
+			Asinh(e) => format!("casinh({})", e.to_wgsl()),
+			Acosh(e) => format!("cacosh({})", e.to_wgsl()),
+			Atanh(e) => format!("catanh({})", e.to_wgsl()),
+			Round(e) => format!("cround({})", e.to_wgsl()),
+			Ceil(e)  => format!("cceil({})", e.to_wgsl()),
+			Floor(e) => format!("cfloor({})", e.to_wgsl()),
+			// 2 order
+			Sum(box(l, r))       => format!("cadd({},{})", l.to_wgsl(), r.to_wgsl()),
+			Prod(box(l, r))      => format!("cmul({},{})", l.to_wgsl(), r.to_wgsl()),
+			Div(box(num, denom)) => format!("cdiv({},{})", num.to_wgsl(), denom.to_wgsl()),
+			Pow(box(b, t))       => format!("cpow({},{})", b.to_wgsl(), t.to_wgsl()),
 			// _ => todo!()
 		}
 	}
@@ -1541,7 +1889,7 @@ mod expr {
 
 		#[test] fn _160() { assert_eq!(Expr::from_u64(160), UInt(5)) }
 		#[test] fn _161() { assert_eq!(Expr::from_u64(161), Float(2.5e-323)) }
-		#[test] fn _162() { assert_eq!(Expr::from_u64(162), Complex(cf(2.802596928649634e-45, 0.0))) }
+		#[test] fn _162() { assert_eq!(Expr::from_u64(162), Complex(cf(2.802596928649634e-45, 0.))) }
 		#[test] fn _163() { assert_eq!(Expr::from_u64(163), Neg(bx(UInt(0)))) }
 		#[test] fn _164() { assert_eq!(Expr::from_u64(164), Abs(bx(UInt(0)))) }
 		#[test] fn _165() { assert_eq!(Expr::from_u64(165), Arg(bx(UInt(0)))) }
@@ -1745,7 +2093,7 @@ mod expr {
 
 		#[test] fn _160() { assert_eq!(BigUint::from(160_u32), UInt(5).to_int()) }
 		#[test] fn _161() { assert_eq!(BigUint::from(161_u32), Float(2.5e-323).to_int()) }
-		#[test] fn _162() { assert_eq!(BigUint::from(162_u32), Complex(cf(2.802596928649634e-45, 0.0)).to_int()) }
+		#[test] fn _162() { assert_eq!(BigUint::from(162_u32), Complex(cf(2.802596928649634e-45, 0.)).to_int()) }
 		#[test] fn _163() { assert_eq!(BigUint::from(163_u32), Neg(bx(UInt(0))).to_int()) }
 		#[test] fn _164() { assert_eq!(BigUint::from(164_u32), Abs(bx(UInt(0))).to_int()) }
 		#[test] fn _165() { assert_eq!(BigUint::from(165_u32), Arg(bx(UInt(0))).to_int()) }
