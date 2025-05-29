@@ -19,7 +19,8 @@ Y                 		toggle `assign_zesc_once`
 G                 		toggle GPU usage
 -=                		dec/inc `alpha` by `alpha_step`
 90                		dec/inc `alpha_step` 1.1 times
-Space             		toggle some keys repeat mode\
+Space             		toggle some keys repeat mode
+V                 		toggle verbose output\
 """
 
 [profile.release]
