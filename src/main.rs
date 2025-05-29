@@ -1228,7 +1228,7 @@ impl Expr {
 	fn to_string(&self) -> String {
 		self
 			._to_string()
-			.remove_outermost_brackets()
+			.remove_paired_outermost_brackets()
 	}
 	fn _to_string(&self) -> String {
 		use Expr::*;
@@ -1324,29 +1324,40 @@ impl Expr {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum ExprFromStrErr {
+enum ExprFromStrErrType {
 	BadBracketsSequence,
-	BracketClosingBeforeOpeningAt { index: usize },
+	BracketClosingBeforeOpeningAt,
 	BadExpression,
 }
-impl ToString for ExprFromStrErr {
+impl ToString for ExprFromStrErrType {
 	fn to_string(&self) -> String {
+		use ExprFromStrErrType::*;
 		match self {
-			Self::BadBracketsSequence => format!("bad brackets sequence"),
-			Self::BracketClosingBeforeOpeningAt { index } => format!("closing bracket before opening at index {index}"),
-			Self::BadExpression => format!("bad expression"),
+			BadBracketsSequence => format!("bad brackets sequence"),
+			BracketClosingBeforeOpeningAt => format!("closing bracket before opening"),
+			BadExpression => format!("bad expression"),
 		}
 	}
 }
+#[derive(Debug, PartialEq, Eq)]
+struct ExprFromStrErr {
+	type_: ExprFromStrErrType,
+	index: Option<usize>,
+	s: Option<String>,
+}
 impl ExprFromStrErr {
 	fn shift_index_by(mut self, delta: usize) -> Self {
-		match &mut self {
-			Self::BracketClosingBeforeOpeningAt { index } => {
-				*index += delta;
-			}
-			_ => {}
+		if let Some(index) = &mut self.index {
+			*index += delta;
 		}
 		self
+	}
+}
+impl ToString for ExprFromStrErr {
+	fn to_string(&self) -> String {
+		let at_index_s = if let Some(i) = self.index { format!(" at index {i}") } else { format!("") };
+		let error_part_s = if let Some(s) = &self.s { format!(": `{s}`") } else { format!("") };
+		[self.type_.to_string(), at_index_s, error_part_s].concat()
 	}
 }
 
@@ -1354,10 +1365,11 @@ impl FromStr for Expr {
 	type Err = ExprFromStrErr;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		use Expr::*;
+		use ExprFromStrErrType::*;
 		// dbg!(s);
 		let s: &str = &s.trim().to_lowercase();
 		// dbg!(s);
-		if s.starts_with('(') && s.ends_with(')') {
+		if s.is_outermost_brackets_paired() {
 			return Self::from_str(&s[1..s.len()-1])
 		}
 		match s {
@@ -1402,10 +1414,10 @@ impl FromStr for Expr {
 				_ => {}
 			}
 			// dbg!(level);
-			if !(level >= 0) { return Err(ExprFromStrErr::BracketClosingBeforeOpeningAt { index: i }) }
+			if !(level >= 0) { return Err(ExprFromStrErr{ type_: BracketClosingBeforeOpeningAt, index: Some(i), s: Some(s.to_string()) }) }
 		}
 		// dbg!(level);
-		return if !(level == 0) { Err(ExprFromStrErr::BadBracketsSequence) }
+		return if !(level == 0) { Err(ExprFromStrErr{ type_: BadBracketsSequence, index: None, s: Some(s.to_string()) }) }
 		else if let Some(i) = index_of_plus {
 			let l = Self::from_str(&s[..i])?;
 			let r = Self::from_str(&s[i+1..])
@@ -1558,43 +1570,51 @@ impl FromStr for Expr {
 			Ok(Floor(bx(inner)))
 		}
 		else {
-			Err(ExprFromStrErr::BadExpression)
+			Err(ExprFromStrErr{ type_: BadExpression, index: None, s: Some(s.to_string()) })
 		}
 	}
 }
 
 
 
-trait RemoveOutermostBrackets {
-	fn remove_outermost_brackets(&self) -> String;
+trait IsOutermostBracketsPaired {
+	fn is_outermost_brackets_paired(&self) -> bool;
 }
-impl RemoveOutermostBrackets for String {
-	fn remove_outermost_brackets(&self) -> String {
-		let s: &str = self;
-		s.remove_outermost_brackets()
+impl IsOutermostBracketsPaired for String {
+	fn is_outermost_brackets_paired(&self) -> bool {
+		self.as_str().is_outermost_brackets_paired()
 	}
 }
-impl RemoveOutermostBrackets for &str {
-	fn remove_outermost_brackets(&self) -> String {
-		let mut s: &str = self;
-		while s.starts_with('(') && s.ends_with(')') {
-			let mut level: i32 = 0;
-			let mut levels = vec![level];
-			for c in s[..s.len()].chars() {
-				match c {
-					'(' => { level += 1; }
-					')' => { level -= 1; }
-					_ => {}
-				}
-				levels.push(level);
-				if !(level >= 0) { unreachable!() }
+impl IsOutermostBracketsPaired for str {
+	fn is_outermost_brackets_paired(&self) -> bool {
+		let s: &str = self;
+		if !(s.starts_with('(') && s.ends_with(')')) { return false }
+		let mut level: i32 = 0;
+		for c in s[..s.len()-1].chars() {
+			match c {
+				'(' => { level += 1; }
+				')' => { level -= 1; }
+				_ => {}
 			}
-			let is_outer_paired = levels[1..levels.len()-1].iter().all(|&l| l > 0);
-			if is_outer_paired {
-				s = &s[1..s.len()-1];
-			} else {
-				break
-			}
+			if level == 0 { return false }
+		}
+		true
+	}
+}
+
+trait RemoveOutermostPairedBrackets {
+	fn remove_paired_outermost_brackets(&self) -> String;
+}
+impl RemoveOutermostPairedBrackets for String {
+	fn remove_paired_outermost_brackets(&self) -> String {
+		self.as_str().remove_paired_outermost_brackets()
+	}
+}
+impl RemoveOutermostPairedBrackets for str {
+	fn remove_paired_outermost_brackets(&self) -> String {
+		let mut s: &str = self.trim();
+		while s.is_outermost_brackets_paired() {
+			s = &s[1..s.len()-1].trim();
 		}
 		s.to_string()
 	}
@@ -2171,9 +2191,30 @@ mod expr {
 }
 
 #[cfg(test)]
+mod tests {
+	use super::*;
+	#[test] fn true_1() { assert_eq!(true, "()".is_outermost_brackets_paired()) }
+	#[test] fn true_2() { assert_eq!(true, "(a)".is_outermost_brackets_paired()) }
+	#[test] fn true_3() { assert_eq!(true, "(a+b)".is_outermost_brackets_paired()) }
+	#[test] fn true_4() { assert_eq!(true, "(3141542137)".is_outermost_brackets_paired()) }
+	#[test] fn true_5() { assert_eq!(true, "((((b))))".is_outermost_brackets_paired()) }
+	#[test] fn true_6() { assert_eq!(true, "(mmm)".is_outermost_brackets_paired()) }
+	#[test] fn true_7() { assert_eq!(true, "( mmm )".is_outermost_brackets_paired()) }
+	#[test] fn true_8() { assert_eq!(true, "((a)+(b))".is_outermost_brackets_paired()) }
+	#[test] fn true_9() { assert_eq!(true, "(((((a))+(c)))+((b)+d))".is_outermost_brackets_paired()) }
+	#[test] fn false_1() { assert_eq!(false, "()()".is_outermost_brackets_paired()) }
+	#[test] fn false_2() { assert_eq!(false, "()()()()".is_outermost_brackets_paired()) }
+	#[test] fn false_3() { assert_eq!(false, "(a)+(b)".is_outermost_brackets_paired()) }
+	#[test] fn false_4() { assert_eq!(false, "(a)-()".is_outermost_brackets_paired()) }
+	#[test] fn false_5() { assert_eq!(false, "()*(a)".is_outermost_brackets_paired()) }
+	#[test] fn false_6() { assert_eq!(false, "(abc) / (xyz)".is_outermost_brackets_paired()) }
+	#[test] fn false_7() { assert_eq!(false, "(a+(re(b)+im((c+1)^2))) - f(x)".is_outermost_brackets_paired()) }
+}
+
+#[cfg(test)]
 mod remove_outermost_brackets {
 	use super::*;
-	#[test] fn _1() { assert_eq!("(Re(Z)*(Im(Z))^(Alpha))+InitZ", "((Re(Z)*(Im(Z))^(Alpha))+InitZ)".remove_outermost_brackets()) }
-	#[test] fn _2() { assert_eq!("a+b", "(a+b)".remove_outermost_brackets()) }
-	#[test] fn _3() { assert_eq!("(a)+(b)", "(a)+(b)".remove_outermost_brackets()) }
+	#[test] fn _1() { assert_eq!("(Re(Z)*(Im(Z))^(Alpha))+InitZ", "((Re(Z)*(Im(Z))^(Alpha))+InitZ)".remove_paired_outermost_brackets()) }
+	#[test] fn _2() { assert_eq!("a+b", "(a+b)".remove_paired_outermost_brackets()) }
+	#[test] fn _3() { assert_eq!("(a)+(b)", "(a)+(b)".remove_paired_outermost_brackets()) }
 }
