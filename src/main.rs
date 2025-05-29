@@ -134,7 +134,9 @@ impl From<CliArgs> for Params {
 						let expr = Expr::from_int(&id);
 						(id, expr)
 					} else {
-						let expr = Expr::from_str(&fractal).unwrap();
+						let expr = Expr::from_str(&fractal).unwrap_or_else(|e| {
+							panic!("Error: {}", e.to_string())
+						});
 						let id = expr.to_int();
 						(id, expr)
 					}
@@ -208,10 +210,11 @@ fn main() {
 			// scale_mode: ScaleMode::Stretch,
 			..WindowOptions::default()
 		}
-	).unwrap();
+	).expect("unable to create window");
 
 	window.set_target_fps(60);
-	window.update_with_buffer(&buffer, w, h).unwrap();
+	window.update_with_buffer(&buffer, w, h).expect(UNABLE_TO_UPDATE_WINDOW_BUFFER);
+
 
 	let mut zoom : float = 1.;
 	let mut cam_x: float = 0.;
@@ -603,7 +606,7 @@ fn main() {
 
 				// Wait for the GPU to finish working on the submitted work. This doesn't work on WebGPU, so we would need
 				// to rely on the callback to know when the buffer is mapped.
-				device.poll(wgpu::PollType::Wait).unwrap();
+				device.poll(wgpu::PollType::Wait).expect("unable to poll GPU for result");
 
 				// println!("GPU CALC DONE in {:.4} seconds", time_begin_gpu_calc.elapsed().as_secs_f64());
 				// let time_begin_gpu_load = Instant::now();
@@ -628,9 +631,11 @@ fn main() {
 			}
 		}
 
-		window.update_with_buffer(&buffer, w, h).unwrap();
+		window.update_with_buffer(&buffer, w, h).expect(UNABLE_TO_UPDATE_WINDOW_BUFFER);
 	}
 }
+
+const UNABLE_TO_UPDATE_WINDOW_BUFFER: &str = "unable to update window buffer";
 
 
 
