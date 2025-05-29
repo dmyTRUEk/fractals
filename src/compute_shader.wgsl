@@ -260,6 +260,12 @@ fn is_inf(x: f32) -> bool {
 
 
 
+fn is_fin(x: f32) -> bool {
+	return !is_inf(x) && !is_nan(x);
+}
+
+
+
 struct C {
 	re: f32,
 	im: f32,
@@ -361,10 +367,10 @@ fn cexp(z: C) -> C {
 	var im = z.im;
 	if is_inf(re) {
 		if re < 0. {
-			if !is_inf(im) {
+			if !is_fin(im) {
 				return Czero;
 			}
-		} else if im == 0. || !is_inf(im) {
+		} else if im == 0. || !is_fin(im) {
 			if is_inf(im) {
 				im = f32_nan();
 			}
